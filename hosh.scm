@@ -80,23 +80,28 @@
   (x (error "pars" x))))
 (define (pss x) (match (parse x)
   (((? op o) . xs) `(() ,o ,@xs))
-  ((x . xs) (match-let1 (y . ys) (pss xs) `((,x ,@y) ,@ys)))))
+  (((or ('id x) x) . xs) (match-let1 (y . ys) (pss xs) `((,x ,@y) ,@ys)))))
 (define (whre xs) (match xs
   (() ())
-  ((((? =? o) (f . a) b) . xs) (let1 f? (pa$ eq? f) (match (whre xs)
-    ((((? =?) (? f?) ('|\\| . ps)) . xs) `((,o ,f (|\\| (-> ,a ,b) ,@ps)) ,@xs))
-    (xs                              `((,o ,f (|\\| (-> ,a ,b)     )) ,@xs)))))
+  ((((? =? o) (f . a) b) . xs) (let ((c `(-> ,(if (eq? o '=) a `(_ ,@a)) ,b))
+                                     (f? (pa$ eq? f))) (match (whre xs)
+    ((((? =?) (? f?) ('|\\| . ps)) . xs) `((,o ,f (|\\| ,c ,@ps)) ,@xs))
+    (                                xs  `((,o ,f (|\\| ,c     )) ,@xs)))))
   ((x . xs) `(,x ,@(whre xs)))))
 (define (onearg? x) (or (not (pair? x)) (memq (car x) '(|:| list))))
+(define (ls x) (if (onearg? x) `(,x) x))
 (define (mkpat x) (match x
   (('|:| x y) (cons (mkpat x) (mkpat y)))
   (('list . xs) (map mkpat xs))
-  (('-> x y) (if (onearg? x) `((,(mkpat x)) ,y) `(,(mkpat x) ,y)))
+  (('-> x y) `(,(ls (mkpat x)) ,y))
   (x (if (pair? x) (map mkpat x) x))))
-(define-macro ( $  x y) (if (pair? x) `(,@x ,y) `(,x ,y)))
+;(define-macro ($ x y) `(,@(ls x) ,y))
 (define-macro (|\\| . x) `(match-lambda* ,@(mkpat x)))
+(define-macro (|:=| . x) (match (mkpat x)
+  ((f (_ ((_ 'opt) o) . xs)) `(define-syntax ,f (syntax-rules ,(ls o) ,@xs)))
+  ((f (_              . xs)) `(define-syntax ,f (syntax-rules  ()     ,@xs)))))
 (define (evl s) (eval (whre (car (parse (L (scan s 0))))) (interaction-environment)))
-(define (hmain)
+(define (hmain src)
   (let1 thunk (lambda () (evl 
     (if (pair? *argv*)
       (call-with-input-file (car *argv*) port->string)
@@ -108,36 +113,39 @@
   ((x . xs) (format #t "\n~A(~A" s x) (map (pa$ p #`"  ,s") xs) (format #t ")"))
   (_ (format #t " ~A" xs))))
 (define src "#!/usr/bin/env hosh
-mac x y := z
-mac x y := z
-x ? y | z | ... := if x y (z | ...)
-x     |     ... := x ...
 [] ++ y = y
 (x:xs) ++ y = x : (xs ++ y)
 fact 0 = 1
 fact n = n * fact (n-1)
+f ... $ x := f ... x
+f     $ x := f x
+x . f ... := f ... x
+x . f     := f x
+(|) opt := (?)
+x ? y | z | ... := if x y (z | ...)
+(|) x           := x
+x -> y := (\\) (x -> y)
 x & ... = stringAppend $@ map x2string x
 x + ... = withModule gauche (+) $@ map x2number x
+replace x y z = regexpReplaceAll x z y
+x .. y = x>y ? []
+       | x : (x+1 .. y)
 main arg = do
   print \"\"
   print $ ``aaa``&123
   print $ [1,2] ++ [3,4]
+  print $ 1 .. 5
   print $ fact 4
+  print $ replace #/a/ ``b`` $ ``aaa``
   print '*argv*'
   print arg
 ")
+(hmain src)
 ;(p "" (mkpat (whre (car (parse (L (scan src 0)))))))
-(define src "mac := (?)
-mac x y := z
-mac x y := z
+(define src "#!/bin/sh
+let a=1 
+    b=2
+ in f a b
 ")
-(define (whre xs) (match xs
-  (() ())
-  ((('= (f . a) b) . xs) (let1 f? (pa$ eq? f) (match (whre xs)
-    ((('= (? f?) ('|\\| . ps)) . xs) `((= ,f (|\\| (-> ,a ,b) ,@ps)) ,@xs))
-    (xs                              `((= ,f (|\\| (-> ,a ,b)     )) ,@xs)))))
-  ((('|:=| (f . a) b) . xs) (let1 f? (pa$ eq? f) (match (whre xs)
-    ((('|:=| (? f?) ('|\\| () . ps)) . xs) `((|:=| ,f (|\\| () ((_ ,@a) ,b) ,@ps)) ,@xs))
-    (xs                              `((|:=| ,f (|\\| () ((_ ,@a) ,b)     )) ,@xs)))))
-  ((x . xs) `(,x ,@(whre xs)))))
-(p "" (whre (car (parse (L (scan src 0))))))
+(p "" (mkpat (whre (car (parse (L (scan src 0)))))))
+
