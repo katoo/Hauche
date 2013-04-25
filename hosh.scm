@@ -1,27 +1,38 @@
 #!/usr/local/bin/gosh
+(define op (apply hash-table '(eq?
+  (^ r 19) (* a 18) (/ a 18) (+ a 17) (- a 17)
+  (& a 16) (|:| r 16) (++ r 16) (.. r 16)
+  (== l 15) (!= l 15) (< l 15) (<= l 15) (> l 15) (>= l 15) (and a 14) (or a 14)
+  ($ r 9) ($@ r 9) (|.| l 9) (? r 8) (then r 8) (|\|| a 7) (else a 7)
+  (match l 4) (in r 4) (where r 4) (catch r 4) (--> r 3)
+  (-> a 3) (|\\| a 2) (<- r 1) (= r 1) (|:=| a 1) (|,| a 0) (|;| a 0)
+  (|(| l -1) (|)| l -1) (|{| l -1) (|}| l -1) (|[| l -1) (|]| l -1) (-- l -2))))
 (define-syntax uses (syntax-rules () ((_ m ...) (begin (use m) ...))))
 (define-syntax defs (syntax-rules () ((_ (k v) ...) (begin (define k v) ...))))
 (define-syntax macs (syntax-rules () ((_ (k v) ...) (begin (define-macro (k . x) `(v ,@x)) ...))))
 (uses util.match)
-(defs (|[]| list) (|:| cons) (++ append) (== equal?))
+(defs (|[]| list) (|:| cons) (++ append) (== equal?) ($@ apply))
 (macs (= define) (<- set!) (fn match-lambda*) (do begin) (|;| begin))
 (define-method object-apply (obj key) (ref obj key #f))
 (define-method (setter object-apply) (obj key val) (set! (ref obj key) val) obj)
-(define (replace x y z) (regexp-replace-all* z x y))
 (define (len m l)
   (match (#/\n+/ (m 2))
     (#f (+ (string-length (m)) l))
     (t     (string-length (t 'after)))))
 (define (rd s) (rxmatch-case s
-  (#/^''(.*)''$/ (#f x) x)
+  (#/^``(.*)``$/ (#f x) x)
+  (#/^'(.*)'$/ (#f x) (string->symbol x))
+  (#/^[a-z]/ () (string->symbol (regexp-replace-all* s
+    #/([a-z])([A-Z])/ (lambda (m) #`",(m 1)-,(char-downcase (ref (m 2) 0))")
+    "2" "->")))
   (#/^[\"#\w]/ () (read-from-string s))
   (else (string->symbol s))))
 (define (scan s n)
-            ;(regexp             |heardoc|string         |var|paren     |op
-  (match (#/^(#\/(?:\\.|[^\/])*\/|``.*?``|"(?:\\.|[^"])*"|\w+|[()\[\]{}]|[^\w\s()\[\]{}"']+)(?: *-- [^\n]*)?(\s*)/ s)
+            ;(regexp             |shebang |heardoc|string               |var  |paren     |op
+  (match (#/^(#\/(?:\\.|[^\/])*\/|#![^\n]*|``.*?``|['"](?:\\.|[^"])*['"]|#?\w+|[()\[\]{}]|[^\w\s()\[\]{}"']+)(?: *-- [^\n]*)?(\s*)/ s)
     (#f ())
     (m (let* ((l (len m n)) (x (rd (m 1))) (xs (scan (m 'after) l))) (cond 
-      ((#/^(let|do|where|\\|\||of)$/ (m 1)) `(,x ("{}" ,l) ,@xs))
+      ((#/^(let|do|where|of)$/ (m 1)) `(,x ("{}" ,l) ,@xs))
       ((#/ *\n/ (m 2))                `(,x ("<>" ,l) ,@xs))
       (else                           `(,x           ,@xs)))))))
 (define L (match-lambda*
@@ -38,14 +49,7 @@
 (define (ap . xs) (match xs
   ((f x (g . y)) (if (and (eq? f g) (eq? (car (op f)) 'a)) `(,f ,x ,@y) xs))
   (xs xs)))
-(define op (apply hash-table '(eq?
-  (^ r 19) (* a 18) (/ a 18) (+ a 17) (- a 17)
-  (& a 16) (|:| r 16) (++ r 16) (.. r 16)
-  (== l 15) (!= l 15) (< l 15) (<= l 15) (> l 15) (>= l 15) (and a 14) (or a 14)
-  ($ r 9) (|.| l 9) (? r 8) (then r 8) (! a 7) (else a 7)
-  (match l 4) (in r 4) (where r 4) (catch r 4) (--> r 3)
-  (-> a 3) (|\|| a 2) (<- r 1) (= r 1) (|:=| a 1) (|,| a 0) (|;| a 0)
-  (|(| l -1) (|)| l -1) (|{| l -1) (|}| l -1) (|[| l -1) (|]| l -1) (-- l -2))))
+(define (=? x) (memq x '(= |:=|)))
 (define (<? x) (memq x '(|(| |{| |[|)))
 (define (>? x) (memq x '(|)| |}| |]|)))
 (define (op0 x) (and (op x) (not (or (<? x) (>? x)))))
@@ -79,9 +83,9 @@
   ((x . xs) (match-let1 (y . ys) (pss xs) `((,x ,@y) ,@ys)))))
 (define (whre xs) (match xs
   (() ())
-  ((('= (f . a) b) . xs) (let1 f? (pa$ eq? f) (match (whre xs)
-    ((('= (? f?) ('|\\| . ps)) . xs) `((= ,f (|\\| (-> ,a ,b) ,@ps)) ,@xs))
-    (xs                              `((= ,f (|\\| (-> ,a ,b)     )) ,@xs)))))
+  ((((? =? o) (f . a) b) . xs) (let1 f? (pa$ eq? f) (match (whre xs)
+    ((((? =?) (? f?) ('|\\| . ps)) . xs) `((,o ,f (|\\| (-> ,a ,b) ,@ps)) ,@xs))
+    (xs                              `((,o ,f (|\\| (-> ,a ,b)     )) ,@xs)))))
   ((x . xs) `(,x ,@(whre xs)))))
 (define (onearg? x) (or (not (pair? x)) (memq (car x) '(|:| list))))
 (define (mkpat x) (match x
@@ -91,23 +95,49 @@
   (x (if (pair? x) (map mkpat x) x))))
 (define-macro ( $  x y) (if (pair? x) `(,@x ,y) `(,x ,y)))
 (define-macro (|\\| . x) `(match-lambda* ,@(mkpat x)))
-(define src "#!/usr/bin/env hosh
-[] ++ y = y
-(x:xs) ++ y = x : (xs ++ y)
-print $ [1,2] ++ [3,4]
-fact 0 = 1
-fact n = n * fact (n-1)
-print $ fact 4
-")
 (define (evl s) (eval (whre (car (parse (L (scan s 0))))) (interaction-environment)))
+(define (hmain)
+  (let1 thunk (lambda () (evl 
+    (if (pair? *argv*)
+      (call-with-input-file (car *argv*) port->string)
+      src)))
+    (if (sys-getenv "REQUEST_METHOD")
+      (with-error-handler (lambda (e) (print "Content-type: text/plain\n\n" (ref e 'message))) thunk)
+      (thunk))))
 (define (p s xs) (match xs
   ((x . xs) (format #t "\n~A(~A" s x) (map (pa$ p #`"  ,s") xs) (format #t ")"))
   (_ (format #t " ~A" xs))))
-;(p "" (mkpat (whre (car (parse (L (scan (replace #/^#!.*?\n/ "" src) 0)))))))
-(let1 thunk (lambda () (evl (replace #/^#!.*?\n/ ""
-  (if (pair? *argv*)
-    (call-with-input-file (car *argv*) port->string)
-    src))))
-  (if (sys-getenv "REQUEST_METHOD")
-    (with-error-handler (lambda (e) (print "Content-type: text/plain\n\n" (ref e 'message))) thunk)
-    (thunk)))
+(define src "#!/usr/bin/env hosh
+mac x y := z
+mac x y := z
+x ? y | z | ... := if x y (z | ...)
+x     |     ... := x ...
+[] ++ y = y
+(x:xs) ++ y = x : (xs ++ y)
+fact 0 = 1
+fact n = n * fact (n-1)
+x & ... = stringAppend $@ map x2string x
+x + ... = withModule gauche (+) $@ map x2number x
+main arg = do
+  print \"\"
+  print $ ``aaa``&123
+  print $ [1,2] ++ [3,4]
+  print $ fact 4
+  print '*argv*'
+  print arg
+")
+;(p "" (mkpat (whre (car (parse (L (scan src 0)))))))
+(define src "mac := (?)
+mac x y := z
+mac x y := z
+")
+(define (whre xs) (match xs
+  (() ())
+  ((('= (f . a) b) . xs) (let1 f? (pa$ eq? f) (match (whre xs)
+    ((('= (? f?) ('|\\| . ps)) . xs) `((= ,f (|\\| (-> ,a ,b) ,@ps)) ,@xs))
+    (xs                              `((= ,f (|\\| (-> ,a ,b)     )) ,@xs)))))
+  ((('|:=| (f . a) b) . xs) (let1 f? (pa$ eq? f) (match (whre xs)
+    ((('|:=| (? f?) ('|\\| () . ps)) . xs) `((|:=| ,f (|\\| () ((_ ,@a) ,b) ,@ps)) ,@xs))
+    (xs                              `((|:=| ,f (|\\| () ((_ ,@a) ,b)     )) ,@xs)))))
+  ((x . xs) `(,x ,@(whre xs)))))
+(p "" (whre (car (parse (L (scan src 0))))))
