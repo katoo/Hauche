@@ -49,6 +49,7 @@
 (define (ap . xs) (match xs
   ((f x (g . y)) (if (and (eq? f g) (eq? (car (op f)) 'a)) `(,f ,x ,@y) xs))
   (xs xs)))
+(define (np? x) (not (memq x '(|:| list))))
 (define (=? x) (memq x '(= |:=|)))
 (define (<? x) (memq x '(|(| |{| |[|)))
 (define (>? x) (memq x '(|)| |}| |]|)))
@@ -80,7 +81,8 @@
   (x (error "pars" x))))
 (define (pss x) (match (parse x)
   (((? op o) . xs) `(() ,o ,@xs))
-  (((or ('id x) x) . xs) (match-let1 (y . ys) (pss xs) `((,x ,@y) ,@ys)))))
+  (((or ('id x) x) . xs) (match-let1 (y . ys) (pss xs) `((,x ,@y) ,@ys)))
+  (x (error "pss" x))))
 (define (whre xs) (match xs
   (() ())
   ((((? =? o) (f . a) b) . xs) (let ((c `(-> ,(if (eq? o '=) a `(_ ,@a)) ,b))
@@ -94,19 +96,23 @@
   (('|:| x y) (cons (mkpat x) (mkpat y)))
   (('list . xs) (map mkpat xs))
   (('-> x y) `(,(ls (mkpat x)) ,y))
+  (('= x y) `(,(mkpat x) ,y))
   (x (if (pair? x) (map mkpat x) x))))
 ;(define-macro ($ x y) `(,@(ls x) ,y))
 (define-macro (|\\| . x) `(match-lambda* ,@(mkpat x)))
 (define-macro (|:=| . x) (match (mkpat x)
   ((f (_ ((_ 'opt) o) . xs)) `(define-syntax ,f (syntax-rules ,(ls o) ,@xs)))
   ((f (_              . xs)) `(define-syntax ,f (syntax-rules  ()     ,@xs)))))
-(define (evl s) (eval (whre (car (parse (L (scan s 0))))) (interaction-environment)))
-(define (hmain src)
-  (let1 thunk (lambda () (evl 
-    (if (pair? *argv*)
-      (call-with-input-file (car *argv*) port->string)
-      src)))
-    (if (sys-getenv "REQUEST_METHOD")
+(define (pre s) (regexp-replace-all* s
+  #/#![^\n]*\n*/ ""
+  #/<html.*html>/ "print ``\\0``"
+  #/<%=(.*)%>/ "`` (\\1) ``"))
+(define (evl s . o) (let1 x (whre (car (parse (L (scan (pre s) 0))))) (match o
+  (() (eval x (interaction-environment)))
+  (_  (p "" (macroexpand x))))))
+(define (hmain src) (let1 thunk (lambda () (evl
+    (if (pair? *argv*) (call-with-input-file (car *argv*) port->string) src)))
+  (if (sys-getenv "REQUEST_METHOD")
       (with-error-handler (lambda (e) (print "Content-type: text/plain\n\n" (ref e 'message))) thunk)
       (thunk))))
 (define (p s xs) (match xs
@@ -139,13 +145,26 @@ main arg = do
   print $ replace #/a/ ``b`` $ ``aaa``
   print '*argv*'
   print arg
-")
-(hmain src)
-;(p "" (mkpat (whre (car (parse (L (scan src 0)))))))
-(define src "#!/bin/sh
-let a=1 
-    b=2
- in f a b
-")
-(p "" (mkpat (whre (car (parse (L (scan src 0)))))))
 
+<html>
+<%=1+1%>
+</html>
+")
+;(evl src 1)
+(define (whre xs) (match xs
+  (() ())
+  ((((? =? o) ((? np? f) . a) b) . xs) (let
+    ((c `(-> ,(if (eq? o '=) a `(_ ,@a)) ,b))
+     (f? (pa$ eq? f))) (match (whre xs)
+    ((((? =?) (? f?) ('|\\| . ps)) . xs) `((,o ,f (|\\| ,c ,@ps)) ,@xs))
+    (                                xs  `((,o ,f (|\\| ,c     )) ,@xs)))))
+  ((x . xs) `(,x ,@(whre xs)))))
+(define (whre2 x) (match (whre x) (('|;| . x) x) (x `(,x))))
+(define-macro (where x y) `(match-letre ,(mkpat (whre2 y)) ,x))
+(define src "#!/bin/sh
+a+b where
+  [a,b]=[1,2]
+  b=2
+  a:b=3
+")
+(evl src 1)
