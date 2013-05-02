@@ -1,4 +1,4 @@
-#!/share/personal_data4/home/9554/local/bin/gosh
+#!/usr/local/bin/gosh
 (define op (apply hash-table '(eq?
   (^ r 19) (* a 18) (/ a 18) (+ a 17) (- a 17)
   (& a 16) (|:| r 16) (++ r 16) (.. r 16) (=~ l 15)
@@ -82,6 +82,7 @@
   (x (error "pars" x))))
 (define (pss x) (match (parse x)
   (((? op o) . xs) `(() ,o ,@xs))
+  (('if . xs) (pss xs))
   (((or ('id x) x) . xs) (match-let1 (y . ys) (pss xs) `((,x ,@y) ,@ys)))
   (x (error "pss" x))))
 (define (whre xs) (match xs
@@ -107,12 +108,12 @@
   ((f (_              . xs)) `(define-syntax ,f (syntax-rules  ()     ,@xs)))))
 (define-macro (where x y) `(match-letrec ,(mkpat (whre2 y)) ,x))
 (define-macro (in x y) `(match-letrec ,(mkpat (whre2 (cadr x))) ,y))
-(define (pre s) (regexp-replace-all* s
+(define (pre s) (regexp-replace-all* #`",s\n"
   #/#![^\n]*\n*/ ""
   #/<html.*html>/ "print header ``\\0``"
   #/<%=(.*)%>/ "`` (\\1) ``"))
 (define (evl s . o) (let1 x (whre (car (parse (L (scan (pre s) 0))))) (match o
-  ((1) (p "" (macroexpand x)))
+  ((1) (p "" (unwrap-syntax (macroexpand x))))
   (_ (eval x (interaction-environment))))))
 (define (hosh s . o) (let1 thunk (lambda () (evl
     (if (pair? *argv*) (call-with-input-file (car *argv*) port->string) s) o))
@@ -120,16 +121,17 @@
     (with-error-handler (lambda (e) (print header (ref e 'message))) thunk)
     (thunk))))
 (define (p s xs) (match xs
-  ((x . xs) (format #t "\n~A(~A" s x) (map (pa$ p #`"  ,s") xs) (format #t ")"))
+  ((x . xs) (format #t "\n~A(~A" s x) (map (pa$ p #`",s  ") xs) (format #t ")"))
   (_ (format #t " ~A" xs))))
 (evl "#!init
+pmac x := p ```` $ unwrapSyntax $ macroexpand $ quote x
 call f = f $@ ()
 f ... $ x := f ... x
 f     $ x := f x
 x . f ... := f ... x
 x . f     := f x
 (|) opt := (?)
-x ? y | z | ... := if x y (z | ...)
+x ? y | z | ... := cond (x y) (#t (z | ...)) -- if x y (z | ...)
 (|) x           := x
 x -> y := (\\) (x -> y)
 x & ... = stringAppend $@ x2string <$> x
@@ -157,5 +159,4 @@ cgidic = hash (qs =~ #/=/ ? kv <$> split #/&/ qs | [])
         kv x = string2symbol k : urlDecode v where [k,v] = split #/=/ x
 cgi x := cgidic (quote x) || \"\"
 ")
-(hosh "call (-> print 123)
-")
+(hosh "")

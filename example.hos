@@ -1,2 +1,0 @@
-#!/usr/bin/env hosh
-main arg = print arg

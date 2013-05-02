@@ -1,4 +1,4 @@
-#!/var/www/sdcard/new/Hauche/hosh
+#!/usr/local/bin/hosh
 <html>
 <form>
 <input name=i>
