@@ -1,9 +1,9 @@
-#!/usr/local/bin/gosh
+#!/share/personal_data4/home/9554/local/bin/gosh
 (define op (apply hash-table '(eq?
   (^ r 19) (* a 18) (/ a 18) (+ a 17) (- a 17)
-  (& a 16) (|:| r 16) (++ r 16) (.. r 16)
+  (& a 16) (|:| r 16) (++ r 16) (.. r 16) (=~ l 15)
   (== l 15) (!= l 15) (< l 15) (<= l 15) (> l 15) (>= l 15) (&& a 14) (|\|\|| a 14)
-  ($ r 9) ($@ r 9) (|.| l 9) (? r 8) (then r 8) (|\|| a 7) (else a 7)
+  (<$> r 9) ($ r 9) ($@ r 9) (|.| l 9) (? r 8) (then r 8) (|\|| a 7) (else a 7)
   (match l 4) (in r 4) (where r 4) (catch r 4)
   (-> a 3) (|\\| a 2) (<- r 1) (= r 1) (|:=| a 1) (|,| a 0) (|;| a 0)
   (|(| l -1) (|)| l -1) (|{| l -1) (|}| l -1) (|[| l -1) (|]| l -1) (-- l -2))))
@@ -11,8 +11,8 @@
 (define-syntax defs (syntax-rules () ((_ (k v) ...) (begin (define k v) ...))))
 (define-syntax macs (syntax-rules () ((_ (k v) ...) (begin (define-macro (k . x) `(v ,@x)) ...))))
 (uses util.match)
-(defs (|:| cons) (++ append) (== equal?) ($@ apply))
-(macs (= define) (<- set!) (do begin) (|;| begin))
+(defs (|:| cons) (++ append) (== equal?) ($@ apply) (! not) (=~ rxmatch) (<$> map))
+(macs (= define) (<- set!) (? and) (&& and) (|\|\|| or) (do begin) (|;| begin))
 (define-method object-apply (obj key) (ref obj key #f))
 (define-method (setter object-apply) (obj key val) (set! (ref obj key) val) obj)
 (define (len m l)
@@ -23,13 +23,13 @@
   (#/^``(.*)``$/ (#f x) x)
   (#/^'(.*)'$/ (#f x) (string->symbol x))
   (#/^[a-z]/ () (string->symbol (regexp-replace-all* s
-    #/([a-z])([A-Z])/ (lambda (m) #`",(m 1)-,(char-downcase (ref (m 2) 0))")
-    "2" "->")))
+    #/P$/ "?" #/Q$/ "!" "2" "->"
+    #/([a-z])([A-Z])/ (lambda (m) #`",(m 1)-,(char-downcase (ref (m 2) 0))"))))
   (#/^[\"#\w]/ () (read-from-string s))
   (else (string->symbol s))))
 (define (scan s n)
-            ;(regexp             |heardoc|string               |var  |paren     |op
-  (match (#/^(#\/(?:\\.|[^\/])*\/|``.*?``|['"](?:\\.|[^"])*['"]|#?\w+|[()\[\]{}]|[^\w\s()\[\]{}"']+)(?: *-- [^\n]*)?(\s*)/ s)
+            ;(regexp             |#exp|heardoc|string         |symbl|var|paren     |op
+  (match (#/^(#\/(?:\\.|[^\/])*\/|#\S+|``.*?``|"(?:\\.|[^"])*"|'.*?'|\w+|[()\[\]{}]|[^\w\s()\[\]{}`"']+)(?: *-- [^\n]*)?(\s*)/ s)
     (#f ())
     (m (let* ((l (len m n)) (x (rd (m 1))) (xs (scan (m 'after) l))) (cond 
       ((#/^(let|do|where|of)$/ (m 1)) `(,x ("{}" ,l) ,@xs))
@@ -67,6 +67,7 @@
 (define (parse x) (match x
   (((? <? p) (? >?) . xs) `(() ,@xs)) ;`(,(paren p '(|,|)) ,@xs)      ;[]
   (((? <?  ) (? op0 o) (? >?) . xs) `((id ,o) ,@xs))      ;(+)
+  (((? <? p) '-> . xs) (match-let1 (y . ys) (parse `(,p ,@xs)) `((lambda () ,y) ,@ys))) ;(->x) 
   (((? <? p) (? op0 o) . xs) (sect (^g (parse `(,p ,g ,o ,@xs))))) ;(+x)
   (((? <? p) . xs) (pars `(,p -) (pss xs)))
   (x x)))
@@ -104,28 +105,25 @@
 (define-macro (|:=| . x) (match (mkpat x)
   ((f (_ ((_ 'opt) o) . xs)) `(define-syntax ,f (syntax-rules ,(ls o) ,@xs)))
   ((f (_              . xs)) `(define-syntax ,f (syntax-rules  ()     ,@xs)))))
-(define-macro (where x y) `(match-letre ,(mkpat (whre2 y)) ,x))
+(define-macro (where x y) `(match-letrec ,(mkpat (whre2 y)) ,x))
+(define-macro (in x y) `(match-letrec ,(mkpat (whre2 (cadr x))) ,y))
 (define (pre s) (regexp-replace-all* s
   #/#![^\n]*\n*/ ""
   #/<html.*html>/ "print header ``\\0``"
   #/<%=(.*)%>/ "`` (\\1) ``"))
 (define (evl s . o) (let1 x (whre (car (parse (L (scan (pre s) 0))))) (match o
-  (() (eval x (interaction-environment)))
-  (_  (p "" (macroexpand x))))))
-(define header "Content-type: text/html\n\n")
-(define (hmain src) (let1 thunk (lambda () (evl
-    (if (pair? *argv*) (call-with-input-file (car *argv*) port->string) src)))
+  ((1) (p "" (macroexpand x)))
+  (_ (eval x (interaction-environment))))))
+(define (hosh s . o) (let1 thunk (lambda () (evl
+    (if (pair? *argv*) (call-with-input-file (car *argv*) port->string) s) o))
   (if (sys-getenv "REQUEST_METHOD")
     (with-error-handler (lambda (e) (print header (ref e 'message))) thunk)
     (thunk))))
 (define (p s xs) (match xs
   ((x . xs) (format #t "\n~A(~A" s x) (map (pa$ p #`"  ,s") xs) (format #t ")"))
   (_ (format #t " ~A" xs))))
-(define src "#!/usr/bin/env hosh
-[] ++ y = y
-(x:xs) ++ y = x : (xs ++ y)
-fact 0 = 1
-fact n = n * fact (n-1)
+(evl "#!init
+call f = f $@ ()
 f ... $ x := f ... x
 f     $ x := f x
 x . f ... := f ... x
@@ -134,31 +132,30 @@ x . f     := f x
 x ? y | z | ... := if x y (z | ...)
 (|) x           := x
 x -> y := (\\) (x -> y)
-x & ... = stringAppend $@ map x2string x
-x + ... = withModule gauche (+) $@ map x2number x
+x & ... = stringAppend $@ x2string <$> x
+x + ... = withModule gauche (+) $@ x2number <$> x
+header = \"Content-Type: text/html; charset=UTF-8\\n\\n<!DOCTYPE html>\\n\"
+open s m f = (m == \"w\" ? callWithOutputFile | callWithInputFile) s f
+split x y = stringSplit y x
+join  x y = stringJoin  y x
 replace x y z = regexpReplaceAll x z y
+s =~ r = regexpP s ? r =~ s
+       | stringP s ? rxmatch r s | #f
 x .. y = x>y ? []
        | x : (x+1 .. y)
-main arg = do
-  print \"\"
-  print $ ``aaa``&123
-  print $ [1,2] ++ [3,4]
-  print $ 1 .. 5
-  print $ fact 4
-  print $ replace #/a/ ``b`` $ ``aaa``
-  print '*argv*'
-  print arg
-
-<html>
-<%=1+1%>
-</html>
+readHex n = hex n 0
+  where hex 0 r = r
+        hex n r = hex (n-1) (r*16 + digit2integer (call readChar) 16)
+urlDecode s = withStringIo s (-> portForEach wf readChar)
+  where wf #\\% = writeByte $ readHex 2
+        wf c    = writeChar (c == #\\+ ? #\\space | c)
+hash x = hashTable $@ quote equalP : x
+cgidic = hash (qs =~ #/=/ ? kv <$> split #/&/ qs | [])
+  where qs = sysGetenv \"REQUEST_METHOD\" == \"POST\"
+           ? port2string $ call standardInputPort
+           | sysGetenv \"QUERY_STRING\"
+        kv x = string2symbol k : urlDecode v where [k,v] = split #/=/ x
+cgi x := cgidic (quote x) || \"\"
 ")
-(evl src )
-(define src "#!/bin/sh
-a+b where
-  [a,b]=[1,2]
-  b=2
-  a:b=3
+(hosh "call (-> print 123)
 ")
-(evl src 1)
-

@@ -1,0 +1,51 @@
+#!/usr/bin/env gosh
+(use gauche.parseopt)
+(use gauche.config)
+(use util.match)
+(use file.util)
+
+(define p print)
+
+(define (usage) (exit 0 "Usage: scm2exe [-o outfile] <script>"))
+
+(define (main args)
+  (let-args (cdr args) ([outfile "o=s"]
+                        [help "h|help" => (cut usage)]
+                        . args)
+    (match args
+      [(ifile)
+       (let ([ofile (or outfile (path-swap-extension ifile "out"))]
+             [cfile (generate-cprog ifile)])
+         (compile cfile ofile)
+         (sys-unlink cfile))]
+      [_ (usage)])
+    0))
+
+(define (generate-cprog ifile)
+  (receive (out tmpfile) (sys-mkstemp "tmp")
+    (with-output-to-port out
+      (lambda ()
+        (p "#include <gauche.h>")
+        (p "static const char *script = ")
+        (dolist [line (file->string-list ifile)]
+          (format #t "~s ~s\n" line "\n"))
+        (p ";")
+        (p "int main(int argc, const char **argv)")
+        (p "{")
+        (p "  Scm_Init(GAUCHE_SIGNATURE);")
+        (p "  Scm_SimpleMain(argc, argv, script, 0);") ; this won't return.
+        (p "  return 0;")  ; pretend to be a good citizen.
+        (p "}")
+        ))
+    (close-output-port out)
+    (rlet1 cfile #`",|tmpfile|.c" (sys-rename tmpfile cfile))))
+
+(define (compile cfile ofile)
+  (let* ((cc      (gauche-config "--cc"))
+         (cflags  (gauche-config "-I"))
+         (ldflags (gauche-config "-L"))
+         (libs    (gauche-config "-l"))
+         (cmd #`",cc ,cflags -o ,ofile ,ldflags ,cfile ,libs")
+         )
+    (print cmd)
+    (sys-system cmd)))
