@@ -4,7 +4,7 @@
   (& a 16) (|:| r 16) (++ r 16) (.. r 16) (=~ l 15)
   (== l 15) (!= l 15) (< l 15) (<= l 15) (> l 15) (>= l 15) (&& a 14) (|\|\|| a 14)
   (<$> r 9) ($ r 9) ($@ r 9) (|.| l 9) (? r 8) (then r 8) (|\|| a 7) (else a 7)
-  (match l 4) (in r 4) (where r 4) (catch r 4)
+  (of l 4) (in r 4) (where r 4) (catch r 4)
   (-> a 3) (|\\| a 2) (<- r 1) (= r 1) (|:=| a 1) (|,| a 0) (|;| a 0)
   (|(| l -1) (|)| l -1) (|{| l -1) (|}| l -1) (|[| l -1) (|]| l -1) (-- l -2))))
 (define-syntax uses (syntax-rules () ((_ m ...) (begin (use m) ...))))
@@ -29,7 +29,7 @@
   (else (string->symbol s))))
 (define (scan s n)
             ;(regexp             |#exp|heardoc|string         |symbl|var|paren     |op
-  (match (#/^(#\/(?:\\.|[^\/])*\/|#\S+|``.*?``|"(?:\\.|[^"])*"|'.*?'|\w+|[()\[\]{}]|[^\w\s()\[\]{}`"']+)(?: *-- [^\n]*)?(\s*)/ s)
+  (match (#/^(#\/(?:\\.|[^\/])*\/|#\S+|``.*?``|"(?:\\.|[^"])*"|'.*?'|\w+|[()\[\]{}]|[^\w\s()\[\]{}`"']+)(?:\s*-- [^\n]*)*(\s*)/ s)
     (#f ())
     (m (let* ((l (len m n)) (x (rd (m 1))) (xs (scan (m 'after) l))) (cond 
       ((#/^(let|do|where|of)$/ (m 1)) `(,x ("{}" ,l) ,@xs))
@@ -82,7 +82,7 @@
   (x (error "pars" x))))
 (define (pss x) (match (parse x)
   (((? op o) . xs) `(() ,o ,@xs))
-  (('if . xs) (pss xs))
+  (((or 'if 'case) . xs) (pss xs))
   (((or ('id x) x) . xs) (match-let1 (y . ys) (pss xs) `((,x ,@y) ,@ys)))
   (x (error "pss" x))))
 (define (whre xs) (match xs
@@ -93,7 +93,7 @@
     ((((? =?) (? f?) ('|\\| . ps)) . xs) `((,o ,f (|\\| ,c ,@ps)) ,@xs))
     (                                xs  `((,o ,f (|\\| ,c     )) ,@xs)))))
   ((x . xs) `(,x ,@(whre xs)))))
-(define (whre2 x) (match (whre x) (('|;| . x) x) (x `(,x))))
+(define (unsemc x) (match (whre x) (('|;| . x) x) (x `(,x))))
 (define (onearg? x) (or (not (pair? x)) (memq (car x) '(|:| list))))
 (define (ls x) (if (onearg? x) `(,x) x))
 (define (mkpat x) (match x
@@ -106,8 +106,7 @@
 (define-macro (|:=| . x) (match (mkpat x)
   ((f (_ ((_ 'opt) o) . xs)) `(define-syntax ,f (syntax-rules ,(ls o) ,@xs)))
   ((f (_              . xs)) `(define-syntax ,f (syntax-rules  ()     ,@xs)))))
-(define-macro (where x y) `(match-letrec ,(mkpat (whre2 y)) ,x))
-(define-macro (in x y) `(match-letrec ,(mkpat (whre2 (cadr x))) ,y))
+(define-macro (where x y) `(match-letrec ,(mkpat (unsemc y)) ,x))
 (define (pre s) (regexp-replace-all* #`",s\n"
   #/#![^\n]*\n*/ ""
   #/<html.*html>/ "print header ``\\0``"
@@ -124,16 +123,15 @@
   ((x . xs) (format #t "\n~A(~A" s x) (map (pa$ p #`",s  ") xs) (format #t ")"))
   (_ (format #t " ~A" xs))))
 (evl "#!init
-pmac x := p ```` $ unwrapSyntax $ macroexpand $ quote x
 call f = f $@ ()
 f ... $ x := f ... x
 f     $ x := f x
-x . f ... := f ... x
-x . f     := f x
+x . f := f $ x
 (|) opt := (?)
 x ? y | z | ... := cond (x y) (#t (z | ...)) -- if x y (z | ...)
 (|) x           := x
 x -> y := (\\) (x -> y)
+let_ x in y := y where x
 x & ... = stringAppend $@ x2string <$> x
 x + ... = withModule gauche (+) $@ x2number <$> x
 header = \"Content-Type: text/html; charset=UTF-8\\n\\n<!DOCTYPE html>\\n\"
@@ -158,5 +156,11 @@ cgidic = hash (qs =~ #/=/ ? kv <$> split #/&/ qs | [])
            | sysGetenv \"QUERY_STRING\"
         kv x = string2symbol k : urlDecode v where [k,v] = split #/=/ x
 cgi x := cgidic (quote x) || \"\"
+argf [] thunk = call thunk
+argf xs thunk = forEach (f -> withInputFromFile f thunk) xs
+pp x := p ```` $ unwrapSyntax $ macroexpand $ quote x
 ")
-(hosh "")
+(hosh "pp ( case x of
+  p -> e
+  p -> e)
+")
