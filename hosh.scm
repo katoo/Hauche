@@ -21,7 +21,7 @@
     (t     (string-length (t 'after)))))
 (define (rd s) (rxmatch-case s
   (#/^``(.*)``$/ (#f x) x)
-  (#/^'(.*)'$/ (#f x) (string->symbol x))
+  (#/^'(.*)'$/ (#f x) (read-from-string x))
   (#/^[a-z]/ () (string->symbol (regexp-replace-all* s
     #/P$/ "?" #/Q$/ "!" "2" "->"
     #/([a-z])([A-Z])/ (lambda (m) #`",(m 1)-,(char-downcase (ref (m 2) 0))"))))
@@ -160,7 +160,8 @@ argf [] thunk = call thunk
 argf xs thunk = forEach (f -> withInputFromFile f thunk) xs
 pp x := p ```` $ unwrapSyntax $ macroexpand $ quote x
 ")
-(hosh "pp ( case x of
+(hosh "print $ keywordP ':name'
+pp ( case x of
   p -> e
   p -> e)
 ")
