@@ -2,4 +2,7 @@ hosh: hosh.scm
 	gosh scm2exe -o hosh hosh.scm
 
 install: hosh
-	mv hosh /usr/local/bin
+	install hosh /usr/local/bin
+
+clean:
+	rm hosh
