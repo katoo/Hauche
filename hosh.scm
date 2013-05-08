@@ -1,4 +1,4 @@
-#!/usr/local/bin/gosh
+#!/share/personal_data4/home/9554/local/bin/gosh
 (define op (apply hash-table '(eq?
   (^ r 19) (* a 18) (/ a 18) (+ a 17) (- a 17)
   (& a 16) (|:| r 16) (++ r 16) (.. r 16) (=~ l 15)
@@ -12,7 +12,7 @@
 (define-syntax macs (syntax-rules () ((_ (k v) ...) (begin (define-macro (k . x) `(v ,@x)) ...))))
 (uses util.match)
 (defs (|:| cons) (++ append) (== equal?) ($@ apply) (! not) (=~ rxmatch) (<$> map))
-(macs (= define) (<- set!) (? and) (&& and) (|\|\|| or) (do begin) (|;| begin))
+(macs (= define) (<- set!) (then and) (? and) (&& and) (|\|\|| or) (do begin) (|;| begin))
 (define-method object-apply (obj key) (ref obj key #f))
 (define-method (setter object-apply) (obj key val) (set! (ref obj key) val) obj)
 (define (len m l)
@@ -23,7 +23,7 @@
   (#/^``(.*)``$/ (#f x) x)
   (#/^'(.*)'$/ (#f x) (read-from-string x))
   (#/^[a-z]/ () (string->symbol (regexp-replace-all* s
-    #/P$/ "?" #/Q$/ "!" "2" "->"
+    #/P$/ "?" #/Q$/ "!" #/S$/ "*" "2" "->"
     #/([a-z])([A-Z])/ (lambda (m) #`",(m 1)-,(char-downcase (ref (m 2) 0))"))))
   (#/^[\"#\w]/ () (read-from-string s))
   (else (string->symbol s))))
@@ -135,12 +135,19 @@ let_ x in y := y where x
 x & ... = stringAppend $@ x2string <$> x
 x + ... = withModule gauche (+) $@ x2number <$> x
 header = \"Content-Type: text/html; charset=UTF-8\\n\\n<!DOCTYPE html>\\n\"
-open s m f = (m == \"w\" ? callWithOutputFile | callWithInputFile) s f
+open s \"w\" f = callWithOutputFile s f
+open s \"a\" f = callWithOutputFile s f ':if-exists' ':append'
+open s _     f = callWithInputFile  s f
+readFile   f   = open f \"r\" port2string
+writeFile  f s = open f \"w\" (p -> display s p)
+appendFile f s = open f \"a\" (p -> display s p)
 split x y = stringSplit y x
 join  x y = stringJoin  y x
 replace x y z = regexpReplaceAll x z y
+x != y = !(x == y)
 s =~ r = regexpP s ? r =~ s
        | stringP s ? rxmatch r s | #f
+x !~ r = !(x =~ r)
 x .. y = x>y ? []
        | x : (x+1 .. y)
 readHex n = hex n 0
@@ -161,7 +168,13 @@ argf xs thunk = forEach (f -> withInputFromFile f thunk) xs
 pp x := p ```` $ unwrapSyntax $ macroexpand $ quote x
 ")
 (hosh "print $ keywordP ':name'
+split _ [] = [[]]
+split p (x:xs) = p x ? []:y:ys
+               |       (x:y):ys
+  where y:ys = split p xs
+print $ split (==0) [1,1,0,2,2,0,3,3]
 pp ( case x of
   p -> e
   p -> e)
 ")
+
