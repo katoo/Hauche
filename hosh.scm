@@ -1,9 +1,9 @@
 #!/usr/local/bin/gosh
 (define op (apply hash-table '(eq?
   (^ r 19) (* a 18) (/ a 18) (% l 18) (+ a 17) (- a 17)
-  (& a 16) (|:| r 16) (++ r 16) (.. r 16) (=~ l 15)
+  (& a 16) (|::| r 16) (++ r 16) (.. r 16) (=~ l 15)
   (== l 15) (!= l 15) (< l 15) (<= l 15) (> l 15) (>= l 15) (&& a 14) (|\|\|| a 14)
-  (o a 9) (<$> r 9) ($ r 9) ($@ r 9) (|.| l 9) (? r 8) (then r 8) (|\|| a 7) (else a 7)
+  (o a 9) (<$> r 9) ($ r 9) ($@ r 9) (|.| l 9) (? r 8) (then r 8) (|:| a 7) (else a 7)
   (of l 4) (in r 4) (where r 4) (catch r 4)
   (-> a 3) (|\\| a 2) (<- r 1) (= r 1) (|:=| a 1) (|,| a 0) (|;| a 0)
   (|(| l -1) (|)| l -1) (|{| l -1) (|}| l -1) (|[| l -1) (|]| l -1) (-- l -2))))
@@ -11,7 +11,7 @@
 (define-syntax defs (syntax-rules () ((_ (k v) ...) (begin (define k v) ...))))
 (define-syntax macs (syntax-rules () ((_ (k v) ...) (begin (define-macro (k . x) `(v ,@x)) ...))))
 (uses util.match)
-(defs (|:| cons) (++ append) (== equal?) (^ expt) (% modulo) ($@ apply) (! not) (=~ rxmatch) (o compose) (<$> map))
+(defs (|::| cons) (++ append) (== equal?) (^ expt) (% modulo) ($@ apply) (! not) (=~ rxmatch) (o compose) (<$> map))
 (macs (= define) (<- set!) (then and) (? and) (&& and) (|\|\|| or) (do begin) (|;| begin))
 (define-method object-apply (obj key) (ref obj key #f))
 (define-method (setter object-apply) (obj key val) (set! (ref obj key) val) obj)
@@ -49,7 +49,7 @@
 (define (ap . xs) (match xs
   ((f x (g . y)) (if (and (eq? f g) (eq? (car (op f)) 'a)) `(,f ,x ,@y) xs))
   (xs xs)))
-(define (np? x) (not (memq x '(|:| list))))
+(define (np? x) (not (memq x '(|::| list))))
 (define (=? x) (memq x '(= |:=|)))
 (define (<? x) (memq x '(|(| |{| |[|)))
 (define (>? x) (memq x '(|)| |}| |]|)))
@@ -95,10 +95,10 @@
   ((x . xs) `(,x ,@(whre xs)))
   (xs xs)))
 (define (unsemc x) (match (whre x) (('|;| . x) x) (x `(,x))))
-(define (onearg? x) (or (not (pair? x)) (memq (car x) '(|:| list))))
+(define (onearg? x) (or (not (pair? x)) (memq (car x) '(|::| list))))
 (define (ls x) (if (onearg? x) `(,x) x))
 (define (mkpat x) (match x
-  (('|:| x y) (cons (mkpat x) (mkpat y)))
+  (('|::| x y) (cons (mkpat x) (mkpat y)))
   (('list . xs) (map mkpat xs))
   (('-> x y) `(,(ls (mkpat x)) ,y))
   (('= x y) `(,(mkpat x) ,y))
@@ -130,9 +130,9 @@ call f = f $@ ()
 f ... $ x := f ... x
 f     $ x := f x
 x . f := f $ x
-(|) opt := (?)
-x ? y | z | ... := cond (x y) (#t (z | ...)) -- if x y (z | ...)
-(|) x           := x
+(:) opt := (?)
+x ? y : z : ... := cond (x y) (#t (z : ...)) -- if x y (z : ...)
+(:) x           := x
 (else) opt := (then)
 if x then y else z else ... := cond (x y) (#t (z else ...))
 (else) x := x
@@ -152,21 +152,21 @@ join  x y = stringJoin  (map x2string y) x
 replace x y z = regexpReplaceAll x z y
 x != y = not (x == y)
 s =~ r = regexpP s ? r =~ s
-       | stringP s ? rxmatch r s | #f
+       : stringP s ? rxmatch r s : #f
 x .. y = x>y ? []
-       | x : (x+1 .. y)
+       : x :: (x+1 .. y)
 readHex n = hex n 0
   where hex 0 r = r
         hex n r = hex (n-1) (r*16 + digit2integer (call readChar) 16)
 urlDecode s = withStringIo s (-> portForEach wf readChar)
   where wf #\\% = writeByte $ readHex 2
-        wf c    = writeChar (c == #\\+ ? #\\space | c)
-hash x = hashTable $@ quote equalP : x
-cgidic = hash (qs =~ #/=/ ? kv <$> split #/&/ qs | [])
+        wf c    = writeChar (c == #\\+ ? #\\space : c)
+hash x = hashTable $@ quote equalP :: x
+cgidic = hash (qs =~ #/=/ ? kv <$> split #/&/ qs : [])
   where qs = sysGetenv \"REQUEST_METHOD\" == \"POST\"
            ? port2string $ call standardInputPort
-           | sysGetenv \"QUERY_STRING\"
-        kv x = string2symbol k : urlDecode v where [k,v] = split #/=/ x
+           : sysGetenv \"QUERY_STRING\"
+        kv x = string2symbol k :: urlDecode v where [k,v] = split #/=/ x
 cgi x := cgidic (quote x) || \"\"
 argf [] thunk = call thunk
 argf xs thunk = forEach (f -> withInputFromFile f thunk) xs
@@ -180,9 +180,9 @@ pp x := p ```` $ unwrapSyntax $ macroexpand $ quote x
   print 123
   print 456
 fizzbuzz n = n%15==0 ? \"fizzbuzz\"
-           | n%3 ==0 ? \"fizz\"
-           | n%5 ==0 ? \"buzz\"
-           |           n
+           : n%3 ==0 ? \"fizz\"
+           : n%5 ==0 ? \"buzz\"
+           :           n
 (1..15).forEach (print o fizzbuzz)
 print $ join \"\n\" $ map fizzbuzz (1..15)
 ")
