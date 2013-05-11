@@ -1,9 +1,11 @@
 #!/usr/local/bin/gosh
 (define op (apply hash-table '(eq?
+  (|.| l 20) (o a 20)
   (^ r 19) (* a 18) (/ a 18) (% l 18) (+ a 17) (- a 17)
   (& a 16) (|::| r 16) (++ r 16) (.. r 16) (=~ l 15)
-  (== l 15) (!= l 15) (< l 15) (<= l 15) (> l 15) (>= l 15) (&& a 14) (|\|\|| a 14)
-  (o a 9) (<$> r 9) ($ r 9) ($@ r 9) (|.| l 9) (? r 8) (then r 8) (|:| a 7) (else a 7)
+  (== l 15) (!= l 15) (< l 15) (<= l 15) (> l 15) (>= l 15)
+  (&& a 14) (|\|\|| a 14)
+  (<$> r 9) ($ r 9) ($@ r 9) (? r 8) (then r 8) (|:| a 7) (else a 7)
   (of l 4) (in r 4) (where r 4) (catch r 4)
   (-> a 3) (|\\| a 2) (<- r 1) (= r 1) (|:=| a 1) (|,| a 0) (|;| a 0)
   (|(| l -1) (|)| l -1) (|{| l -1) (|}| l -1) (|[| l -1) (|]| l -1) (-- l -2))))
@@ -15,6 +17,10 @@
 (macs (= define) (<- set!) (then and) (? and) (&& and) (|\|\|| or) (do begin) (|;| begin))
 (define-method object-apply (obj key) (ref obj key #f))
 (define-method (setter object-apply) (obj key val) (set! (ref obj key) val) obj)
+(define (pre s) (regexp-replace-all* s
+  #/#![^\n]*\n*/ ""
+  #/<html.*html>/ "print header ``\\0``"
+  #/<%=(.*?)%>/ "`` (\\1) ``"))
 (define (len m l)
   (match (#/\n+/ (m 2))
     (#f (+ (string-length (m)) l))
@@ -23,8 +29,9 @@
   (#/^``(.*)``$/ (#f x) x)
   (#/^'(.*)'$/ (#f x) (read-from-string x))
   (#/^[a-z]/ () (string->symbol (regexp-replace-all* s
-    #/P$/ "?" #/Q$/ "!" "2" "->"
-    #/([a-z])([A-Z])/ (lambda (m) #`",(m 1)-,(char-downcase (ref (m 2) 0))"))))
+    #/P$/ "?" #/Q$/ "!" #/S$/ "*" "2" "->"
+    #/([a-z])([A-Z])/ (lambda (m) #`",(m 1)-,(char-downcase (ref (m 2) 0))")
+    #/^to-/ "x->")))
   (#/^[\"#\w]/ () (read-from-string s))
   (else (string->symbol s))))
 (define (scan s n)
@@ -111,10 +118,12 @@
 (define-macro (of x y) (match y
   (('|;| . ys) `((|\\| ,@ys) ,x))
   (        y   `((|\\|  ,y ) ,x))))
-(define (pre s) (regexp-replace-all* s
-  #/#![^\n]*\n*/ ""
-  #/<html.*html>/ "print header ``\\0``"
-  #/<%=(.*)%>/ "`` (\\1) ``"))
+(define (cnd x) (match x
+  (((or 'then '?) x y) `(,x ,y))
+  (               x    `(#t ,x))))
+(define-macro (else . xs) `(cond ,@(map cnd xs)))
+(define-macro (|:|  . xs) `(cond ,@(map cnd xs)))
+(define-macro (call x) `(,x))
 (define (evl src)
   (eval (whre (car (parse (L (scan (pre src) 0))))) (interaction-environment)))
 (define (hosh src) (let1 thunk (lambda () (evl
@@ -126,19 +135,12 @@
   ((x . xs) (format #t "\n~A(~A" s x) (map (pa$ p #`",s  ") xs) (format #t ")"))
   (_ (format #t " ~A" xs))))
 (evl "#!init
-call f = f $@ ()
 f ... $ x := f ... x
 f     $ x := f x
 x . f := f $ x
-(:) opt := (?)
-x ? y : z : ... := cond (x y) (#t (z : ...)) -- if x y (z : ...)
-(:) x           := x
-(else) opt := (then)
-if x then y else z else ... := cond (x y) (#t (z else ...))
-(else) x := x
 x -> y := (\\) (x -> y)
 let_ x in y := y where x
-x & ... = stringAppend $@ x2string <$> x
+x & ... = stringAppend $@ toString <$> x
 x + ... = withModule gauche (+) $@ x2number <$> x
 header = \"Content-Type: text/html; charset=UTF-8\\n\\n<!DOCTYPE html>\\n\"
 open s \"w\" f = callWithOutputFile s f
@@ -148,9 +150,9 @@ readFile   f   = open f \"r\" port2string
 writeFile  f s = open f \"w\" (p -> display s p)
 appendFile f s = open f \"a\" (p -> display s p)
 split x y = stringSplit y x
-join  x y = stringJoin  (map x2string y) x
+join  x y = stringJoin  (map toString y) x
 replace x y z = regexpReplaceAll x z y
-x != y = not (x == y)
+x != y = !(x == y)
 s =~ r = regexpP s ? r =~ s
        : stringP s ? rxmatch r s : #f
 x .. y = x>y ? []
@@ -168,21 +170,13 @@ cgidic = hash (qs =~ #/=/ ? kv <$> split #/&/ qs : [])
            : sysGetenv \"QUERY_STRING\"
         kv x = string2symbol k :: urlDecode v where [k,v] = split #/=/ x
 cgi x := cgidic (quote x) || \"\"
+htmlEsc x = x.toString.replace #/</ \"&lt;\"
 argf [] thunk = call thunk
 argf xs thunk = forEach (f -> withInputFromFile f thunk) xs
 pp x := p ```` $ unwrapSyntax $ macroexpand $ quote x
 ")
-(define (cnd x) (match x
-  (((or 'then '?) x y) `(,x ,y))
-  (               x    `(#t ,x))))
-(define-macro (else . xs) `(cond ,(map cnd xs)))
-(hosh "pp $ do
+(hosh "do
   print 123
   print 456
-fizzbuzz n = n%15==0 ? \"fizzbuzz\"
-           : n%3 ==0 ? \"fizz\"
-           : n%5 ==0 ? \"buzz\"
-           :           n
-(1..15).forEach (print o fizzbuzz)
-print $ join \"\n\" $ map fizzbuzz (1..15)
+print $ quote toNumber
 ")
