@@ -1,4 +1,4 @@
-#!/usr/bin/env gosh
+#!/usr/local/bin/gosh
 (use gauche.parseopt)
 (use gauche.config)
 (use util.match)
