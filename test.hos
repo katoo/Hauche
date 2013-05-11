@@ -1,4 +1,0 @@
-#!/usr/local/bin/hosh
-main arg = do
-  print "Hello World"
-  print arg
