@@ -17,6 +17,46 @@
 (macs (= define) (<- set!) (then and) (? and) (&& and) (|\|\|| or) (do begin) (|;| begin))
 (define-method object-apply (obj key) (ref obj key #f))
 (define-method (setter object-apply) (obj key val) (set! (ref obj key) val) obj)
+
+(define (whre xs) (match xs
+  (() ())
+  ((((? =? o) ((? np? f) . a) b) . xs) (let
+    ((c `(-> ,(if (eq? o '=) a `(_ ,@a)) ,b))
+     (f? (pa$ eq? f))) (match (whre xs)
+    ((((? =?) (? f?) ('|\\| . ps)) . xs) `((,o ,f (|\\| ,c ,@ps)) ,@xs))
+    (                                xs  `((,o ,f (|\\| ,c     )) ,@xs)))))
+  ((x . xs) `(,x ,@(whre xs)))
+  (xs xs)))
+(define (unsemc x) (match (whre x) (('|;| . x) x) (x `(,x))))
+(define (onearg? x) (or (not (pair? x)) (memq (car x) '(|::| list))))
+(define (listm x) (if (onearg? x) `(,x) x))
+(define (mkpat x) (match x
+  (('|::| x y) (cons (mkpat x) (mkpat y)))
+  (('list . xs) (map mkpat xs))
+  (('-> x y) `(,(listm (mkpat x)) ,y))
+  (('= x y) `(,(mkpat x) ,y))
+  (x (if (pair? x) (map mkpat x) x))))
+(define-macro (|\\| . x) `(match-lambda* ,@(mkpat x)))
+(define-macro (|:=| . x) (match (mkpat x)
+  ((f (_ ((_ 'opt) o) . xs)) `(define-syntax ,f (syntax-rules ,(listm o) ,@xs)))
+  ((f (_              . xs)) `(define-syntax ,f (syntax-rules  ()     ,@xs)))))
+(define-macro (where x y) `(match-letrec ,(mkpat (unsemc y)) ,x))
+(define-macro (of x y) (match y
+  (('|;| . ys) `((|\\| ,@ys) ,x))
+  (        y   `((|\\|  ,y ) ,x))))
+(define (cnd x) (match x
+  (((or 'then '?) x y) `(,x ,y))
+  (               x    `(#t ,x))))
+(define-macro (else . xs) `(cond ,@(map cnd xs)))
+(define-macro (|:|  . xs) `(cond ,@(map cnd xs)))
+(define-macro (call x) `(,x))
+(define (=? x) (memq x '(= |:=|)))
+(define (np? x) (not (memq x '(|::| list))))
+
+(define (evl src)
+(define (<? x) (memq x '(|(| |{| |[|)))
+(define (>? x) (memq x '(|)| |}| |]|)))
+(define (op0 x) (and (op x) (not (or (<? x) (>? x)))))
 (define (pre s) (regexp-replace-all* s
   #/#![^\n]*\n*/ ""
   #/<html.*html>/ "print header ``\\0``"
@@ -56,11 +96,6 @@
 (define (ap . xs) (match xs
   ((f x (g . y)) (if (and (eq? f g) (eq? (car (op f)) 'a)) `(,f ,x ,@y) xs))
   (xs xs)))
-(define (np? x) (not (memq x '(|::| list))))
-(define (=? x) (memq x '(= |:=|)))
-(define (<? x) (memq x '(|(| |{| |[|)))
-(define (>? x) (memq x '(|)| |}| |]|)))
-(define (op0 x) (and (op x) (not (or (<? x) (>? x)))))
 (define (reduce? . os) (match (map op os)
   (((d1 n1) (d2 n2)) (if (eq? n1 n2) (eq? d1 'l) (> n1 n2)))
   (_ (error "reduce?" os))))
@@ -92,48 +127,14 @@
   (((or 'if 'case) . xs) (pss xs))
   (((or ('id x) x) . xs) (match-let1 (y . ys) (pss xs) `((,x ,@y) ,@ys)))
   (x (error "pss" x))))
-(define (whre xs) (match xs
-  (() ())
-  ((((? =? o) ((? np? f) . a) b) . xs) (let
-    ((c `(-> ,(if (eq? o '=) a `(_ ,@a)) ,b))
-     (f? (pa$ eq? f))) (match (whre xs)
-    ((((? =?) (? f?) ('|\\| . ps)) . xs) `((,o ,f (|\\| ,c ,@ps)) ,@xs))
-    (                                xs  `((,o ,f (|\\| ,c     )) ,@xs)))))
-  ((x . xs) `(,x ,@(whre xs)))
-  (xs xs)))
-(define (unsemc x) (match (whre x) (('|;| . x) x) (x `(,x))))
-(define (onearg? x) (or (not (pair? x)) (memq (car x) '(|::| list))))
-(define (ls x) (if (onearg? x) `(,x) x))
-(define (mkpat x) (match x
-  (('|::| x y) (cons (mkpat x) (mkpat y)))
-  (('list . xs) (map mkpat xs))
-  (('-> x y) `(,(ls (mkpat x)) ,y))
-  (('= x y) `(,(mkpat x) ,y))
-  (x (if (pair? x) (map mkpat x) x))))
-(define-macro (|\\| . x) `(match-lambda* ,@(mkpat x)))
-(define-macro (|:=| . x) (match (mkpat x)
-  ((f (_ ((_ 'opt) o) . xs)) `(define-syntax ,f (syntax-rules ,(ls o) ,@xs)))
-  ((f (_              . xs)) `(define-syntax ,f (syntax-rules  ()     ,@xs)))))
-(define-macro (where x y) `(match-letrec ,(mkpat (unsemc y)) ,x))
-(define-macro (of x y) (match y
-  (('|;| . ys) `((|\\| ,@ys) ,x))
-  (        y   `((|\\|  ,y ) ,x))))
-(define (cnd x) (match x
-  (((or 'then '?) x y) `(,x ,y))
-  (               x    `(#t ,x))))
-(define-macro (else . xs) `(cond ,@(map cnd xs)))
-(define-macro (|:|  . xs) `(cond ,@(map cnd xs)))
-(define-macro (call x) `(,x))
-(define (evl src)
+;(define (evl src)
   (eval (whre (car (parse (L (scan (pre src) 0))))) (interaction-environment)))
+
 (define (hosh src) (let1 thunk (lambda () (evl
     (if (pair? *argv*) (call-with-input-file (car *argv*) port->string) src)))
   (if (sys-getenv "REQUEST_METHOD")
     (with-error-handler (lambda (e) (print header (ref e 'message))) thunk)
     (thunk))))
-(define (p s xs) (match xs
-  ((x . xs) (format #t "\n~A(~A" s x) (map (pa$ p #`",s  ") xs) (format #t ")"))
-  (_ (format #t " ~A" xs))))
 (evl "#!init
 f ... $ x := f ... x
 f     $ x := f x
@@ -148,7 +149,7 @@ open s \"a\" f = callWithOutputFile s f ':if-exists' ':append'
 open s _     f = callWithInputFile  s f
 readFile   f   = open f \"r\" port2string
 writeFile  f s = open f \"w\" (p -> display s p)
-appendFile f s = open f \"a\" (p -> display s p)
+appendFile f s = open f \"a\" (display s $)
 split x y = stringSplit y x
 join  x y = stringJoin  (map toString y) x
 replace x y z = regexpReplaceAll x z y
@@ -173,10 +174,8 @@ cgi x := cgidic (quote x) || \"\"
 htmlEsc x = x.toString.replace #/</ \"&lt;\"
 argf [] thunk = call thunk
 argf xs thunk = forEach (f -> withInputFromFile f thunk) xs
-pp x := p ```` $ unwrapSyntax $ macroexpand $ quote x
+pf s (x::xs) = s & \"(\" & x & (apply (&) $ map (pf (s & \"  \") $) xs) & \")\"
+pf s  x      =     \" \" & x
+pp x := print $ pf \"\n\" $ unwrapSyntax $ macroexpand $ quote x
 ")
-(hosh "do
-  print 123
-  print 456
-print $ quote toNumber
-")
+(hosh "pp $ 1+2*3")
