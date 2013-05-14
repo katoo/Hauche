@@ -1,25 +1,28 @@
 #!/usr/local/bin/gosh
 (define op (apply hash-table '(eq?
-  (|.| l 20) (o a 20)
-  (^ r 19) (* a 18) (/ a 18) (% l 18) (+ a 17) (- a 17)
-  (& a 16) (|::| r 16) (++ r 16) (.. r 16) (=~ l 15)
-  (== l 15) (!= l 15) (< l 15) (<= l 15) (> l 15) (>= l 15)
-  (&& a 14) (|\|\|| a 14)
+  (|.| l 19) (o a 19)
+  (^ r 18) (* a 17) (/ a 17) (% l 17) (+ a 16) (- a 16)
+  (& a 15) (|::| r 15) (++ r 15) (.. r 16) (=~ l 15)
+  (== l 14) (!= l 14) (< l 14) (<= l 14) (> l 14) (>= l 14)
+  (&& a 13) (|\|\|| a 12)
   (<$> r 9) ($ r 9) ($@ r 9) (? r 8) (then r 8) (|:| a 7) (else a 7)
-  (of l 4) (in r 4) (where r 4) (catch r 4)
-  (-> a 3) (|\\| a 2) (<- r 1) (= r 1) (|:=| a 1) (|,| a 0) (|;| a 0)
-  (|(| l -1) (|)| l -1) (|{| l -1) (|}| l -1) (|[| l -1) (|]| l -1) (-- l -2))))
+  (of l 6) (in r 6) (where r 6) (catch r 6)
+  (-> a 5) (|\\| a 4) (<- r 3) (= r 3) (|:=| a 3) (|,| a 2) (|;| a 2)
+  (|(| l 1) (|)| l 1) (|{| l 1) (|}| l 1) (|[| l 1) (|]| l 1) (-- l -2))))
 (define-syntax uses (syntax-rules () ((_ m ...) (begin (use m) ...))))
 (define-syntax defs (syntax-rules () ((_ (k v) ...) (begin (define k v) ...))))
 (define-syntax macs (syntax-rules () ((_ (k v) ...) (begin (define-macro (k . x) `(v ,@x)) ...))))
 (uses util.match)
 (defs (|::| cons) (++ append) (== equal?) (^ expt) (% modulo) ($@ apply) (! not) (=~ rxmatch) (o compose) (<$> map))
-(macs (= define) (<- set!) (then and) (? and) (&& and) (|\|\|| or) (do begin) (|;| begin))
+(macs (<- set!) (then and) (? and) (&& and) (|\|\|| or) (do begin) (|;| begin) (= define))
 (define-method object-apply (obj key) (ref obj key #f))
 (define-method (setter object-apply) (obj key val) (set! (ref obj key) val) obj)
 
+(define (=? x) (memq x '(= |:=|)))
+(define (np? x) (not (memq x '(|::| list))))
 (define (whre xs) (match xs
   (() ())
+;  ((('= (and ((or '|::| 'list) . _) a) b) . xs) `((= ,(mkpat a) ,b) ,@(whre xs)))
   ((((? =? o) ((? np? f) . a) b) . xs) (let
     ((c `(-> ,(if (eq? o '=) a `(_ ,@a)) ,b))
      (f? (pa$ eq? f))) (match (whre xs)
@@ -37,6 +40,7 @@
   (('= x y) `(,(mkpat x) ,y))
   (x (if (pair? x) (map mkpat x) x))))
 (define-macro (|\\| . x) `(match-lambda* ,@(mkpat x)))
+;(define-macro (= x y) `(match-define ,(mkpat x) ,y))
 (define-macro (|:=| . x) (match (mkpat x)
   ((f (_ ((_ 'opt) o) . xs)) `(define-syntax ,f (syntax-rules ,(listm o) ,@xs)))
   ((f (_              . xs)) `(define-syntax ,f (syntax-rules  ()     ,@xs)))))
@@ -50,8 +54,6 @@
 (define-macro (else . xs) `(cond ,@(map cnd xs)))
 (define-macro (|:|  . xs) `(cond ,@(map cnd xs)))
 (define-macro (call x) `(,x))
-(define (=? x) (memq x '(= |:=|)))
-(define (np? x) (not (memq x '(|::| list))))
 
 (define (evl src)
 (define (<? x) (memq x '(|(| |{| |[|)))
@@ -75,8 +77,8 @@
   (#/^[\"#\w]/ () (read-from-string s))
   (else (string->symbol s))))
 (define (scan s n)
-            ;(regexp             |#exp|heardoc|string         |symbl|var|paren     |op
-  (match (#/^(#\/(?:\\.|[^\/])*\/|#\S+|``.*?``|"(?:\\.|[^"])*"|'.*?'|\w+|[()\[\]{}]|[^\w\s()\[\]{}`"']+)(?:\s*-- [^\n]*)*(\s*)/ s)
+            ;(regexp             |#exp|heardoc|string         |symbl|num     |var|paren     |op
+  (match (#/^(#\/(?:\\.|[^\/])*\/|#\S+|``.*?``|"(?:\\.|[^"])*"|'.*?'|\d[.\d]*|\w+|[()\[\]{}]|[^\w\s()\[\]{}`"']+)(?:\s*-- [^\n]*)*(\s*)/ s)
     (#f ())
     (m (let* ((l (len m n)) (x (rd (m 1))) (xs (scan (m 'after) l))) (cond 
       ((#/^(let|do|where|of)$/ (m 1)) `(,x ("{}" ,l) ,@xs))
@@ -148,7 +150,7 @@ open s \"w\" f = callWithOutputFile s f
 open s \"a\" f = callWithOutputFile s f ':if-exists' ':append'
 open s _     f = callWithInputFile  s f
 readFile   f   = open f \"r\" port2string
-writeFile  f s = open f \"w\" (p -> display s p)
+writeFile  f s = open f \"w\" (display s $)
 appendFile f s = open f \"a\" (display s $)
 split x y = stringSplit y x
 join  x y = stringJoin  (map toString y) x
@@ -172,10 +174,11 @@ cgidic = hash (qs =~ #/=/ ? kv <$> split #/&/ qs : [])
         kv x = string2symbol k :: urlDecode v where [k,v] = split #/=/ x
 cgi x := cgidic (quote x) || \"\"
 htmlEsc x = x.toString.replace #/</ \"&lt;\"
-argf [] thunk = call thunk
-argf xs thunk = forEach (f -> withInputFromFile f thunk) xs
+argf [] f = portForEach f readLine
+argf xs f = forEach (x -> withInputFromFile x (->portForEach f readLine)) xs
 pf s (x::xs) = s & \"(\" & x & (apply (&) $ map (pf (s & \"  \") $) xs) & \")\"
 pf s  x      =     \" \" & x
 pp x := print $ pf \"\n\" $ unwrapSyntax $ macroexpand $ quote x
 ")
-(hosh "pp $ 1+2*3")
+;(define-macro (= x y) `(print (quote ,(mkpat x))))
+(hosh "")
