@@ -2,19 +2,19 @@
 (define op (apply hash-table '(eq?
   (|.| l 19) (o a 19)
   (^ r 18) (* a 17) (/ a 17) (% l 17) (+ a 16) (- a 16)
-  (& a 15) (|::| r 15) (++ r 15) (.. r 16) (=~ l 15)
-  (== l 14) (!= l 14) (< l 14) (<= l 14) (> l 14) (>= l 14)
+  (~ a 15) (|::| r 15) (++ r 15) (.. r 15)
+  (== l 14) (!= l 14) (< l 14) (<= l 14) (> l 14) (>= l 14) (=~ l 14) (!~ l 14)
   (&& a 13) (|\|\|| a 12)
   (<$> r 9) ($ r 9) ($@ r 9) (? r 8) (then r 8) (|:| a 7) (else a 7)
   (of l 6) (in r 6) (where r 6) (catch r 6)
-  (-> a 5) (|\\| a 4) (<- r 3) (= r 3) (|:=| a 3) (|,| a 2) (|;| a 2)
-  (|(| l 1) (|)| l 1) (|{| l 1) (|}| l 1) (|[| l 1) (|]| l 1) (-- l -2))))
-(define-syntax uses (syntax-rules () ((_ m ...) (begin (use m) ...))))
+  (-> a 5) (|\\| a 4) (<- r 3) (= r 3) (|:=| a 3) (|,| a 2) (|;| a 2) ($$ r 2)
+  (|(| l 1) (|)| l 1) (|{| l 1) (|}| l 1) (|[| l 1) (|]| l 1))))
+(define-syntax uses (syntax-rules () ((_ m ...)     (begin (use m) ...))))
 (define-syntax defs (syntax-rules () ((_ (k v) ...) (begin (define k v) ...))))
 (define-syntax macs (syntax-rules () ((_ (k v) ...) (begin (define-macro (k . x) `(v ,@x)) ...))))
 (uses util.match)
-(defs (|::| cons) (++ append) (== equal?) (^ expt) (% modulo) ($@ apply) (! not) (=~ rxmatch) (o compose) (<$> map))
-(macs (<- set!) (then and) (? and) (&& and) (|\|\|| or) (do begin) (|;| begin) (= define))
+(defs (|::| cons) (++ append) (== equal?) (^ expt) (% modulo) ($@ apply) (! not) (o compose) (<$> map))
+(macs (<- set!) (then and) (? and) (&& and) (|\|\|| or) (|;| begin))
 (define-method object-apply (obj key) (ref obj key #f))
 (define-method (setter object-apply) (obj key val) (set! (ref obj key) val) obj)
 
@@ -40,7 +40,7 @@
   (('= x y) `(,(mkpat x) ,y))
   (x (if (pair? x) (map mkpat x) x))))
 (define-macro (|\\| . x) `(match-lambda* ,@(mkpat x)))
-;(define-macro (= x y) `(match-define ,(mkpat x) ,y))
+(define-macro (= x y) `(match-define ,(mkpat x) ,y))
 (define-macro (|:=| . x) (match (mkpat x)
   ((f (_ ((_ 'opt) o) . xs)) `(define-syntax ,f (syntax-rules ,(listm o) ,@xs)))
   ((f (_              . xs)) `(define-syntax ,f (syntax-rules  ()     ,@xs)))))
@@ -55,7 +55,7 @@
 (define-macro (|:|  . xs) `(cond ,@(map cnd xs)))
 (define-macro (call x) `(,x))
 
-(define (evl src)
+;(define (evl src)
 (define (<? x) (memq x '(|(| |{| |[|)))
 (define (>? x) (memq x '(|)| |}| |]|)))
 (define (op0 x) (and (op x) (not (or (<? x) (>? x)))))
@@ -67,8 +67,13 @@
   (match (#/\n+/ (m 2))
     (#f (+ (string-length (m)) l))
     (t     (string-length (t 'after)))))
+(define ($->e s) (rxmatch-case s
+  (#/([^$]*\$)\$(.*)/    (#f s   ss) `(,s ,@($->e ss)))
+  (#/([^$]*)\${(.+?)}(.*)/ (#f s x ss) `(,s ,(p&s x) ,@($->e ss)))
+  (#/([^$]*)\$(\w+)(.*)/ (#f s x ss) `(,s ,(string->symbol x) ,@($->e ss)))
+  (else `(,s))))
 (define (rd s) (rxmatch-case s
-  (#/^``(.*)``$/ (#f x) x)
+  (#/^``(.*)``$/ (#f x) `(~ ,@($->e x)))
   (#/^'(.*)'$/ (#f x) (read-from-string x))
   (#/^[a-z]/ () (string->symbol (regexp-replace-all* s
     #/P$/ "?" #/Q$/ "!" #/S$/ "*" "2" "->"
@@ -77,8 +82,8 @@
   (#/^[\"#\w]/ () (read-from-string s))
   (else (string->symbol s))))
 (define (scan s n)
-            ;(regexp             |#exp|heardoc|string         |symbl|num     |var|paren     |op
-  (match (#/^(#\/(?:\\.|[^\/])*\/|#\S+|``.*?``|"(?:\\.|[^"])*"|'.*?'|\d[.\d]*|\w+|[()\[\]{}]|[^\w\s()\[\]{}`"']+)(?:\s*-- [^\n]*)*(\s*)/ s)
+            ;(regexp             |#exp|heardoc|string         |symbl|num          |var|paren     |op
+  (match (#/^(#\/(?:\\.|[^\/])*\/|#\S+|``.*?``|"(?:\\.|[^"])*"|'.*?'|\d+(?:\.\d+)?|\w+|[()\[\]{}]|[^\w\s()\[\]{}#`"']+)(?:\s*-- [^\n]*)*(\s*)/ s)
     (#f ())
     (m (let* ((l (len m n)) (x (rd (m 1))) (xs (scan (m 'after) l))) (cond 
       ((#/^(let|do|where|of)$/ (m 1)) `(,x ("{}" ,l) ,@xs))
@@ -126,11 +131,11 @@
   (x (error "pars" x))))
 (define (pss x) (match (parse x)
   (((? op o) . xs) `(() ,o ,@xs))
-  (((or 'if 'case) . xs) (pss xs))
+  (((or 'if 'do 'case) . xs) (pss xs))
   (((or ('id x) x) . xs) (match-let1 (y . ys) (pss xs) `((,x ,@y) ,@ys)))
   (x (error "pss" x))))
-;(define (evl src)
-  (eval (whre (car (parse (L (scan (pre src) 0))))) (interaction-environment)))
+(define (p&s src) (whre (car (parse (L (scan (pre src) 0))))))
+(define (evl src) (eval (p&s src) (interaction-environment)))
 
 (define (hosh src) (let1 thunk (lambda () (evl
     (if (pair? *argv*) (call-with-input-file (car *argv*) port->string) src)))
@@ -140,10 +145,11 @@
 (evl "#!init
 f ... $ x := f ... x
 f     $ x := f x
+(f $$ x) := f $ x
 x . f := f $ x
 x -> y := (\\) (x -> y)
 let_ x in y := y where x
-x & ... = stringAppend $@ toString <$> x
+x ~ ... = stringAppend $@ toString <$> x
 x + ... = withModule gauche (+) $@ x2number <$> x
 header = \"Content-Type: text/html; charset=UTF-8\\n\\n<!DOCTYPE html>\\n\"
 open s \"w\" f = callWithOutputFile s f
@@ -155,9 +161,9 @@ appendFile f s = open f \"a\" (display s $)
 split x y = stringSplit y x
 join  x y = stringJoin  (map toString y) x
 replace x y z = regexpReplaceAll x z y
+s =~ r = stringP s && rxmatch r s
 x != y = !(x == y)
-s =~ r = regexpP s ? r =~ s
-       : stringP s ? rxmatch r s : #f
+s !~ r = !(s =~ r)
 x .. y = x>y ? []
        : x :: (x+1 .. y)
 readHex n = hex n 0
@@ -176,9 +182,17 @@ cgi x := cgidic (quote x) || \"\"
 htmlEsc x = x.toString.replace #/</ \"&lt;\"
 argf [] f = portForEach f readLine
 argf xs f = forEach (x -> withInputFromFile x (->portForEach f readLine)) xs
-pf s (x::xs) = s & \"(\" & x & (apply (&) $ map (pf (s & \"  \") $) xs) & \")\"
-pf s  x      =     \" \" & x
+pf s (x::xs) = s ~ \"(\" ~ x ~ (apply (~) $ map (pf (s ~ \"  \") $) xs) ~ \")\"
+pf s  x      =     \" \" ~ x
 pp x := print $ pf \"\n\" $ unwrapSyntax $ macroexpand $ quote x
+show #t = \"True\"
+show #f = \"False\"
+show [] = \"[]\"
+show (x::xs) = \"[\" ~ join \", \" (map show (x::xs)) ~ \"]\"
+show x = x.toString
+p x = print $ show x
+dict (x:y) ... := hashTable (quote equalP) (toString (quote x) :: y) ...
 ")
-;(define-macro (= x y) `(print (quote ,(mkpat x))))
-(hosh "")
+(hosh "a=1
+print ``xx${a}x${a+a}x$a``
+")
