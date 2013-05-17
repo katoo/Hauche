@@ -69,8 +69,7 @@
     (t     (string-length (t 'after)))))
 (define ($->e s) (rxmatch-case s
   (#/([^$]*\$)\$(.*)/    (#f s   ss) `(,s ,@($->e ss)))
-  (#/([^$]*)\${(.+?)}(.*)/ (#f s x ss) `(,s ,(p&s x) ,@($->e ss)))
-  (#/([^$]*)\$(\w+)(.*)/ (#f s x ss) `(,s ,(string->symbol x) ,@($->e ss)))
+  (#/([^$]*)\$(\w+|{.+?})(.*)/ (#f s x ss) `(,s ,(p&s x) ,@($->e ss)))
   (else `(,s))))
 (define (rd s) (rxmatch-case s
   (#/^``(.*)``$/ (#f x) `(~ ,@($->e x)))
@@ -112,6 +111,7 @@
   (('|(| x) x)
   (('|[| ('|,| . xs)) `(list ,@xs))
   (('|{| ('|,| . xs)) `(dict ,@xs))
+  (('|{| (and ((not '|:|) . _) x)) x)
   ((p x) (paren p `(|,| ,x)))))
 (define (parse x) (match x
   (((? <? p) (? >?) . xs) `(() ,@xs)) ;`(,(paren p '(|,|)) ,@xs)      ;[]
@@ -160,7 +160,7 @@ writeFile  f s = open f \"w\" (display s $)
 appendFile f s = open f \"a\" (display s $)
 split x y = stringSplit y x
 join  x y = stringJoin  (map toString y) x
-replace x y z = regexpReplaceAll x z y
+replace x y z = regexpReplaceAll x (z.toString) y
 s =~ r = stringP s && rxmatch r s
 x != y = !(x == y)
 s !~ r = !(s =~ r)
@@ -179,7 +179,7 @@ cgidic = hash (qs =~ #/=/ ? kv <$> split #/&/ qs : [])
            : sysGetenv \"QUERY_STRING\"
         kv x = string2symbol k :: urlDecode v where [k,v] = split #/=/ x
 cgi x := cgidic (quote x) || \"\"
-htmlEsc x = x.toString.replace #/</ \"&lt;\"
+enc \"&\" s = s.replace #/</ \"&lt;\"
 argf [] f = portForEach f readLine
 argf xs f = forEach (x -> withInputFromFile x (->portForEach f readLine)) xs
 pf s (x::xs) = s ~ \"(\" ~ x ~ (apply (~) $ map (pf (s ~ \"  \") $) xs) ~ \")\"
@@ -194,5 +194,5 @@ p x = print $ show x
 dict (x:y) ... := hashTable (quote equalP) (toString (quote x) :: y) ...
 ")
 (hosh "a=1
-print ``xx${a}x${a+a}x$a``
+print ``xx$a xx${a+a}xx``
 ")
