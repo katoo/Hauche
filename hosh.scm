@@ -3,10 +3,10 @@
   (|.| l 19) (o a 19)
   (^ r 18) (* a 17) (/ a 17) (% l 17) (+ a 16) (- a 16)
   (~ a 15) (|::| r 15) (++ r 15) (.. r 15)
-  (== l 14) (!= l 14) (< l 14) (<= l 14) (> l 14) (>= l 14) (=~ l 14) (!~ l 14)
+  (== l 14) (!= l 14) (< a 14) (<= a 14) (> a 14) (>= a 14) (=~ l 14) (!~ l 14)
   (&& a 13) (|\|\|| a 12)
   (<$> r 9) ($ r 9) ($@ r 9) (? r 8) (then r 8) (|:| a 7) (else a 7)
-  (of l 6) (in r 6) (where r 6) (catch r 6)
+  (of l 6) (in r 6) (where l 6) (catch r 6)
   (-> a 5) (|\\| a 4) (<- r 3) (= r 3) (|:=| a 3) (|,| a 2) (|;| a 2) ($$ r 2)
   (|(| l 1) (|)| l 1) (|{| l 1) (|}| l 1) (|[| l 1) (|]| l 1))))
 (define-syntax uses (syntax-rules () ((_ m ...)     (begin (use m) ...))))
@@ -30,7 +30,7 @@
     (                                xs  `((,o ,f (|\\| ,c     )) ,@xs)))))
   ((x . xs) `(,x ,@(whre xs)))
   (xs xs)))
-(define (unsemc x) (match (whre x) (('|;| . x) x) (x `(,x))))
+(define (unsemc x) (match x (('|;| . x) x) (x `(,x))))
 (define (onearg? x) (or (not (pair? x)) (memq (car x) '(|::| list))))
 (define (listm x) (if (onearg? x) `(,x) x))
 (define (mkpat x) (match x
@@ -44,7 +44,7 @@
 (define-macro (|:=| . x) (match (mkpat x)
   ((f (_ ((_ 'opt) o) . xs)) `(define-syntax ,f (syntax-rules ,(listm o) ,@xs)))
   ((f (_              . xs)) `(define-syntax ,f (syntax-rules  ()     ,@xs)))))
-(define-macro (where x y) `(match-letrec ,(mkpat (unsemc y)) ,x))
+(define-macro (where x y) `(match-letrec ,(mkpat (whre (unsemc y))) ,x))
 (define-macro (of x y) (match y
   (('|;| . ys) `((|\\| ,@ys) ,x))
   (        y   `((|\\|  ,y ) ,x))))
@@ -61,8 +61,8 @@
 (define (op0 x) (and (op x) (not (or (<? x) (>? x)))))
 (define (pre s) (regexp-replace-all* s
   #/#![^\n]*\n*/ ""
-  #/<html.*html>/ "print header ``\\0``"
-  #/<%=(.*?)%>/ "`` (\\1) ``"))
+  #/<html.*html>/ "print header '\\0'"
+  #/<%=(.*?)%>/ "' (\\1) '"))
 (define (len m l)
   (match (#/\n+/ (m 2))
     (#f (+ (string-length (m)) l))
@@ -72,8 +72,8 @@
   (#/([^$]*)\$(\w+|{.+?})(.*)/ (#f s x ss) `(,s ,(p&s x) ,@($->e ss)))
   (else `(,s))))
 (define (rd s) (rxmatch-case s
-  (#/^``(.*)``$/ (#f x) `(~ ,@($->e x)))
-  (#/^'(.*)'$/ (#f x) (read-from-string x))
+  (#/^'(.*)'$/ (#f x) (if (#/\$/ x) `(~ ,@($->e x)) x))
+  (#/^`(.*)`$/ (#f x) (read-from-string x))
   (#/^[a-z]/ () (string->symbol (regexp-replace-all* s
     #/P$/ "?" #/Q$/ "!" #/S$/ "*" "2" "->"
     #/([a-z])([A-Z])/ (lambda (m) #`",(m 1)-,(char-downcase (ref (m 2) 0))")
@@ -82,7 +82,7 @@
   (else (string->symbol s))))
 (define (scan s n)
             ;(regexp             |#exp|heardoc|string         |symbl|num          |var|paren     |op
-  (match (#/^(#\/(?:\\.|[^\/])*\/|#\S+|``.*?``|"(?:\\.|[^"])*"|'.*?'|\d+(?:\.\d+)?|\w+|[()\[\]{}]|[^\w\s()\[\]{}#`"']+)(?:\s*-- [^\n]*)*(\s*)/ s)
+  (match (#/^(#\/(?:\\.|[^\/])*\/|#\S+|'.*?'|"(?:\\.|[^"])*"|`.*?`|\d+(?:\.\d+)?|\w+|[()\[\]{}]|[^\w\s()\[\]{}#`"']+)(?:\s*-- [^\n]*)*(\s*)/ s)
     (#f ())
     (m (let* ((l (len m n)) (x (rd (m 1))) (xs (scan (m 'after) l))) (cond 
       ((#/^(let|do|where|of)$/ (m 1)) `(,x ("{}" ,l) ,@xs))
@@ -90,7 +90,7 @@
       (else                           `(,x           ,@xs)))))))
 (define L (match-lambda*
   ((ts) (L `(|(| ,@ts) '(0)))
-  (((or () (("<>" 0))) (0)) `(|)|))
+  (((("<>" 0)) (0)) `(|)|))
   (((("{}" n) '|(| . ts) mss) `(|(| ,@(L ts mss)))
   (((("{}" n)      . ts) mss) `(|(| ,@(L ts `(,n ,@mss))))
   (((and (("<>" n) . ts) tss) (and (m . ms) mss)) (cond
@@ -98,6 +98,7 @@
     ((< n m)      `(|)| ,@(L tss ms)))
     (else         `(|;| ,@(L ts mss)))))
   (((t . ts) mss) `(,t  ,@(L ts mss)))
+  ((() mss) (L '(("<>" 0)) mss))
   (x (error "L" x))))
 (define (ap . xs) (match xs
   ((f x (g . y)) (if (and (eq? f g) (eq? (car (op f)) 'a)) `(,f ,x ,@y) xs))
@@ -153,11 +154,11 @@ x ~ ... = stringAppend $@ toString <$> x
 x + ... = withModule gauche (+) $@ x2number <$> x
 header = \"Content-Type: text/html; charset=UTF-8\\n\\n<!DOCTYPE html>\\n\"
 open s \"w\" f = callWithOutputFile s f
-open s \"a\" f = callWithOutputFile s f ':if-exists' ':append'
+open s \"a\" f = callWithOutputFile s f `:if-exists` `:append`
 open s _     f = callWithInputFile  s f
-readFile   f   = open f \"r\" port2string
-writeFile  f s = open f \"w\" (display s $)
-appendFile f s = open f \"a\" (display s $)
+readFile   f   = open f 'r' port2string
+writeFile  f s = open f 'w' (display s $)
+appendFile f s = open f 'a' (display s $)
 split x y = stringSplit y x
 join  x y = stringJoin  (map toString y) x
 replace x y z = regexpReplaceAll x (z.toString) y
@@ -174,25 +175,32 @@ urlDecode s = withStringIo s (-> portForEach wf readChar)
         wf c    = writeChar (c == #\\+ ? #\\space : c)
 hash x = hashTable $@ quote equalP :: x
 cgidic = hash (qs =~ #/=/ ? kv <$> split #/&/ qs : [])
-  where qs = sysGetenv \"REQUEST_METHOD\" == \"POST\"
+  where qs = sysGetenv 'REQUEST_METHOD' == 'POST'
            ? port2string $ call standardInputPort
-           : sysGetenv \"QUERY_STRING\"
+           : sysGetenv 'QUERY_STRING'
         kv x = string2symbol k :: urlDecode v where [k,v] = split #/=/ x
-cgi x := cgidic (quote x) || \"\"
-enc \"&\" s = s.replace #/</ \"&lt;\"
+cgi x := cgidic (quote x) || ''
 argf [] f = portForEach f readLine
 argf xs f = forEach (x -> withInputFromFile x (->portForEach f readLine)) xs
-pf s (x::xs) = s ~ \"(\" ~ x ~ (apply (~) $ map (pf (s ~ \"  \") $) xs) ~ \")\"
-pf s  x      =     \" \" ~ x
-pp x := print $ pf \"\n\" $ unwrapSyntax $ macroexpand $ quote x
-show #t = \"True\"
-show #f = \"False\"
-show [] = \"[]\"
-show (x::xs) = \"[\" ~ join \", \" (map show (x::xs)) ~ \"]\"
-show x = x.toString
+pf s (x::xs) = s ~ '(' ~ x ~ (apply (~) $ map (pf (s ~ '  ') $) xs) ~ ')'
+pf s  x      =     ' ' ~ x
+pp x := print $ pf '\n' $ unwrapSyntax $ macroexpand $ quote x
+show #t = 'True'
+show #f = 'False'
+show [] = '[]'
+show (x::xs) = '[${show x}${shows xs}]'
+show x = writeToString x
+shows [] = ''
+shows (x::xs) = ', ${show x}${shows xs}'
+shows x = ' | ${show x}'
 p x = print $ show x
 dict (x:y) ... := hashTable (quote equalP) (toString (quote x) :: y) ...
+enc '&' s = s.replace #/</ '&lt;'
+enc '%' s = withStringIo s (-> portForEach wf readByte)
+  where wf b = charSetContainsP #[\\w] (integer2char b) ? writeByte b
+             : format #t \"%~2,'0x\" b
+hread _... = `p&s` $ call readLine
+hprompt _... = (display 'hosh> '; call flush)
 ")
-(hosh "a=1
-print ``xx$a xx${a+a}xx``
-")
+;(hosh "readEvalPrintLoop hread #f p hprompt")
+(hosh "p $ enc '%' 'a<bc'")
