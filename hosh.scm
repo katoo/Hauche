@@ -9,20 +9,21 @@
   (of l 6) (in r 6) (where l 6) (catch r 6)
   (-> a 5) (|\\| a 4) (<- r 3) (= r 3) (|:=| a 3) (|,| a 2) (|;| a 2) ($$ r 2)
   (|(| l 1) (|)| l 1) (|{| l 1) (|}| l 1) (|[| l 1) (|]| l 1))))
-(define-syntax uses (syntax-rules () ((_ m ...)     (begin (use m) ...))))
+(define-syntax uses (syntax-rules () ((_   m   ...) (begin (use m) ...))))
 (define-syntax defs (syntax-rules () ((_ (k v) ...) (begin (define k v) ...))))
 (define-syntax macs (syntax-rules () ((_ (k v) ...) (begin (define-macro (k . x) `(v ,@x)) ...))))
 (uses util.match)
 (defs (|::| cons) (++ append) (== equal?) (^ expt) (% modulo) ($@ apply) (! not) (o compose) (<$> map))
 (macs (<- set!) (then and) (? and) (&& and) (|\|\|| or) (|;| begin))
-(define-method object-apply (obj key) (ref obj key #f))
+;(define-method object-apply (obj key) (ref obj key #f))
+(define-method object-apply (obj key) (guard (e (else #f)) (ref obj key)))
 (define-method (setter object-apply) (obj key val) (set! (ref obj key) val) obj)
 
 (define (=? x) (memq x '(= |:=|)))
 (define (np? x) (not (memq x '(|::| list))))
 (define (whre xs) (match xs
   (() ())
-;  ((('= (and ((or '|::| 'list) . _) a) b) . xs) `((= ,(mkpat a) ,b) ,@(whre xs)))
+  ((('= ('apply f ()) b) . xs) `((= ,f (-> '() ,b)) ,@(whre xs)))
   ((((? =? o) ((? np? f) . a) b) . xs) (let
     ((c `(-> ,(if (eq? o '=) a `(_ ,@a)) ,b))
      (f? (pa$ eq? f))) (match (whre xs)
@@ -40,29 +41,26 @@
   (('= x y) `(,(mkpat x) ,y))
   (x (if (pair? x) (map mkpat x) x))))
 (define-macro (|\\| . x) `(match-lambda* ,@(mkpat x)))
+(define-macro (-> x y) (match x
+  (''() `(lambda () ,y))
+  (x `(|\\a| (-> ,x ,y)))))
 (define-macro (= x y) `(match-define ,(mkpat x) ,y))
 (define-macro (|:=| . x) (match (mkpat x)
   ((f (_ ((_ 'opt) o) . xs)) `(define-syntax ,f (syntax-rules ,(listm o) ,@xs)))
   ((f (_              . xs)) `(define-syntax ,f (syntax-rules  ()     ,@xs)))))
 (define-macro (where x y) `(match-letrec ,(mkpat (whre (unsemc y))) ,x))
-(define-macro (of x y) (match y
-  (('|;| . ys) `((|\\| ,@ys) ,x))
-  (        y   `((|\\|  ,y ) ,x))))
+(define-macro (of x y) `((|\\| ,@(unsemc y)) ,x))
 (define (cnd x) (match x
   (((or 'then '?) x y) `(,x ,y))
   (               x    `(#t ,x))))
 (define-macro (else . xs) `(cond ,@(map cnd xs)))
 (define-macro (|:|  . xs) `(cond ,@(map cnd xs)))
-(define-macro (call x) `(,x))
+;(define-macro (call x) `(,x))
 
-;(define (evl src)
 (define (<? x) (memq x '(|(| |{| |[|)))
 (define (>? x) (memq x '(|)| |}| |]|)))
 (define (op0 x) (and (op x) (not (or (<? x) (>? x)))))
-(define (pre s) (regexp-replace-all* s
-  #/#![^\n]*\n*/ ""
-  #/<html.*html>/ "print header '\\0'"
-  #/<%=(.*?)%>/ "' (\\1) '"))
+(define (pre s) (regexp-replace-all* s #/^((#!|--)[^\n]*)*\n+/ ""))
 (define (len m l)
   (match (#/\n+/ (m 2))
     (#f (+ (string-length (m)) l))
@@ -72,6 +70,7 @@
   (#/([^$]*)\$(\w+|{.+?})(.*)/ (#f s x ss) `(,s ,(p&s x) ,@($->e ss)))
   (else `(,s))))
 (define (rd s) (rxmatch-case s
+  (#/^<html/ () `(print header ,@($->e s)))
   (#/^'(.*)'$/ (#f x) (if (#/\$/ x) `(~ ,@($->e x)) x))
   (#/^`(.*)`$/ (#f x) (read-from-string x))
   (#/^[a-z]/ () (string->symbol (regexp-replace-all* s
@@ -80,11 +79,11 @@
     #/^to-/ "x->")))
   (#/^[\"#\w]/ () (read-from-string s))
   (else (string->symbol s))))
-(define (scan s n)
-            ;(regexp             |#exp|heardoc|string         |symbl|num          |var|paren     |op
-  (match (#/^(#\/(?:\\.|[^\/])*\/|#\S+|'.*?'|"(?:\\.|[^"])*"|`.*?`|\d+(?:\.\d+)?|\w+|[()\[\]{}]|[^\w\s()\[\]{}#`"']+)(?:\s*-- [^\n]*)*(\s*)/ s)
+(define (scan n s)
+            ;(regexp             |#exp|html        |str1 |string         |symbl|num          |var|paren     |op
+  (match (#/^(#\/(?:\\.|[^\/])*\/|#\S+|<html.*html>|'.*?'|"(?:\\.|[^"])*"|`.*?`|\d+(?:\.\d+)?|\w+|[()\[\]{}]|[^\w\s()\[\]{}#`"']+)(?:\s*-- [^\n]*)*(\s*)/ s)
     (#f ())
-    (m (let* ((l (len m n)) (x (rd (m 1))) (xs (scan (m 'after) l))) (cond 
+    (m (let* ((l (len m n)) (x (rd (m 1))) (xs (scan l (m 'after)))) (cond 
       ((#/^(let|do|where|of)$/ (m 1)) `(,x ("{}" ,l) ,@xs))
       ((#/ *\n/ (m 2))                `(,x ("<>" ,l) ,@xs))
       (else                           `(,x           ,@xs)))))))
@@ -114,10 +113,10 @@
   (('|{| ('|,| . xs)) `(dict ,@xs))
   (('|{| (and ((not '|:|) . _) x)) x)
   ((p x) (paren p `(|,| ,x)))))
+(define (%nil p) (match p ('|(| ''()) ('|[| ()) ('|{| '(hash-table 'equal?))))
 (define (parse x) (match x
-  (((? <? p) (? >?) . xs) `(() ,@xs)) ;`(,(paren p '(|,|)) ,@xs)      ;[]
+  (((? <? p) (? >?) . xs) `(,(%nil p) ,@xs)) ;[]
   (((? <?  ) (? op0 o) (? >?) . xs) `((id ,o) ,@xs))      ;(+)
-  (((? <? p) '-> . xs) (match-let1 (y . ys) (parse `(,p ,@xs)) `((lambda () ,y) ,@ys))) ;(->x) 
   (((? <? p) (? op0 o) . xs) (sect (lambda (g) (parse `(,p ,g ,o ,@xs))))) ;(+x)
   (((? <? p) . xs) (pars `(,p -) (pss xs)))
   (x x)))
@@ -133,9 +132,12 @@
 (define (pss x) (match (parse x)
   (((? op o) . xs) `(() ,o ,@xs))
   (((or 'if 'do 'case) . xs) (pss xs))
-  (((or ('id x) x) . xs) (match-let1 (y . ys) (pss xs) `((,x ,@y) ,@ys)))
+  ;(((or ('id x) x) . xs) (match-let1 (y . ys) (pss xs) `((,x ,@y) ,@ys)))
+  (((or ('id x) x) . xs) (match (pss xs)
+    (((''()) . ys) `((apply ,x ()) ,@ys))
+    ((y      . ys) `((,x ,@y)      ,@ys))))
   (x (error "pss" x))))
-(define (p&s src) (whre (car (parse (L (scan (pre src) 0))))))
+(define (p&s src) (whre (car (parse (L (scan 0 (pre src)))))))
 (define (evl src) (eval (p&s src) (interaction-environment)))
 
 (define (hosh src) (let1 thunk (lambda () (evl
@@ -169,19 +171,19 @@ x .. y = x>y ? []
        : x :: (x+1 .. y)
 readHex n = hex n 0
   where hex 0 r = r
-        hex n r = hex (n-1) (r*16 + digit2integer (call readChar) 16)
-urlDecode s = withStringIo s (-> portForEach wf readChar)
+        hex n r = hex (n-1) (r*16 + digit2integer (readChar()) 16)
+urlDecode s = withStringIo s (()-> portForEach wf readChar)
   where wf #\\% = writeByte $ readHex 2
         wf c    = writeChar (c == #\\+ ? #\\space : c)
 hash x = hashTable $@ quote equalP :: x
 cgidic = hash (qs =~ #/=/ ? kv <$> split #/&/ qs : [])
   where qs = sysGetenv 'REQUEST_METHOD' == 'POST'
-           ? port2string $ call standardInputPort
+           ? port2string $ standardInputPort()
            : sysGetenv 'QUERY_STRING'
         kv x = string2symbol k :: urlDecode v where [k,v] = split #/=/ x
 cgi x := cgidic (quote x) || ''
 argf [] f = portForEach f readLine
-argf xs f = forEach (x -> withInputFromFile x (->portForEach f readLine)) xs
+argf xs f = forEach (x -> withInputFromFile x (()->portForEach f readLine)) xs
 pf s (x::xs) = s ~ '(' ~ x ~ (apply (~) $ map (pf (s ~ '  ') $) xs) ~ ')'
 pf s  x      =     ' ' ~ x
 pp x := print $ pf '\n' $ unwrapSyntax $ macroexpand $ quote x
@@ -196,11 +198,18 @@ shows x = ' | ${show x}'
 p x = print $ show x
 dict (x:y) ... := hashTable (quote equalP) (toString (quote x) :: y) ...
 enc '&' s = s.replace #/</ '&lt;'
-enc '%' s = withStringIo s (-> portForEach wf readByte)
+enc '%' s = withStringIo s (()-> portForEach wf readByte)
   where wf b = charSetContainsP #[\\w] (integer2char b) ? writeByte b
              : format #t \"%~2,'0x\" b
-hread _... = `p&s` $ call readLine
-hprompt _... = (display 'hosh> '; call flush)
+hread() = `p&s` $ readLine()
+hprompt() = (display 'hosh> '; flush())
+size x = stringP x ? stringLength x
+       : length x
 ")
 ;(hosh "readEvalPrintLoop hread #f p hprompt")
-(hosh "p $ enc '%' 'a<bc'")
+(hosh "h = {a:1,b:2}
+p $ h 'a'
+h 'c' <- 5
+h 'd' <- 7
+p $ h.hashTableKeys
+")
