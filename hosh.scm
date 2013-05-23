@@ -13,7 +13,7 @@
 (define-syntax defs (syntax-rules () ((_ (k v) ...) (begin (define k v) ...))))
 (define-syntax macs (syntax-rules () ((_ (k v) ...) (begin (define-macro (k . x) `(v ,@x)) ...))))
 (uses util.match)
-(defs (|::| cons) (++ append) (== equal?) (^ expt) (% modulo) ($@ apply) (! not) (o compose) (<$> map))
+(defs (True #t) (False #f) (|::| cons) (++ append) (== equal?) (^ expt) (% modulo) ($@ apply) (! not) (o compose) (<$> map))
 (macs (<- set!) (then and) (? and) (&& and) (|\|\|| or) (|;| begin))
 ;(define-method object-apply (obj key) (ref obj key #f))
 (define-method object-apply (obj key) (guard (e (else #f)) (ref obj key)))
@@ -44,7 +44,9 @@
 (define-macro (-> x y) (match x
   (''() `(lambda () ,y))
   (x `(|\\a| (-> ,x ,y)))))
-(define-macro (= x y) `(match-define ,(mkpat x) ,y))
+(define-macro (= x y) (match x
+  (((or 'list '|::|) . _) `(match-define ,(mkpat x) ,y))
+  (_                      `(define ,x ,y))))
 (define-macro (|:=| . x) (match (mkpat x)
   ((f (_ ((_ 'opt) o) . xs)) `(define-syntax ,f (syntax-rules ,(listm o) ,@xs)))
   ((f (_              . xs)) `(define-syntax ,f (syntax-rules  ()     ,@xs)))))
@@ -60,7 +62,7 @@
 (define (<? x) (memq x '(|(| |{| |[|)))
 (define (>? x) (memq x '(|)| |}| |]|)))
 (define (op0 x) (and (op x) (not (or (<? x) (>? x)))))
-(define (pre s) (regexp-replace-all* s #/^((#!|--)[^\n]*)*\n+/ ""))
+(define (pre s) (regexp-replace-all* s #/^((#!|--)[^\n]*)*\n+/ "0\n"))
 (define (len m l)
   (match (#/\n+/ (m 2))
     (#f (+ (string-length (m)) l))
@@ -84,7 +86,7 @@
   (match (#/^(#\/(?:\\.|[^\/])*\/|#\S+|<html.*html>|'.*?'|"(?:\\.|[^"])*"|`.*?`|\d+(?:\.\d+)?|\w+|[()\[\]{}]|[^\w\s()\[\]{}#`"']+)(?:\s*-- [^\n]*)*(\s*)/ s)
     (#f ())
     (m (let* ((l (len m n)) (x (rd (m 1))) (xs (scan l (m 'after)))) (cond 
-      ((#/^(let|do|where|of)$/ (m 1)) `(,x ("{}" ,l) ,@xs))
+      ((#/^(let|do|where|of|pp)$/ (m 1)) `(,x ("{}" ,l) ,@xs))
       ((#/ *\n/ (m 2))                `(,x ("<>" ,l) ,@xs))
       (else                           `(,x           ,@xs)))))))
 (define L (match-lambda*
@@ -186,7 +188,7 @@ argf [] f = portForEach f readLine
 argf xs f = forEach (x -> withInputFromFile x (()->portForEach f readLine)) xs
 pf s (x::xs) = s ~ '(' ~ x ~ (apply (~) $ map (pf (s ~ '  ') $) xs) ~ ')'
 pf s  x      =     ' ' ~ x
-pp x := print $ pf '\n' $ unwrapSyntax $ macroexpand $ quote x
+(pp x) := print $ pf '\n' $ unwrapSyntax $ macroexpand $ quote x
 show #t = 'True'
 show #f = 'False'
 show [] = '[]'
@@ -207,9 +209,4 @@ size x = stringP x ? stringLength x
        : length x
 ")
 ;(hosh "readEvalPrintLoop hread #f p hprompt")
-(hosh "h = {a:1,b:2}
-p $ h 'a'
-h 'c' <- 5
-h 'd' <- 7
-p $ h.hashTableKeys
-")
+(hosh "main arg = print arg")
