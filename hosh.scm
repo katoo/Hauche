@@ -1,13 +1,13 @@
 #!/usr/local/bin/gosh
-(define op (apply hash-table '(eq?
+(define %op (apply hash-table '(eq?
   (|.| l 19) (o a 19)
   (^ r 18) (* a 17) (/ a 17) (% l 17) (+ a 16) (- a 16)
-  (~ a 15) (|::| r 15) (++ r 15) (.. r 15)
+  (& a 15) (|::| r 15) (++ r 15) (.. r 15)
   (== l 14) (!= l 14) (< a 14) (<= a 14) (> a 14) (>= a 14) (=~ l 14) (!~ l 14)
   (&& a 13) (|\|\|| a 12)
   (<$> r 9) ($ r 9) ($@ r 9) (? r 8) (then r 8) (|:| a 7) (else a 7)
   (of l 6) (in r 6) (where l 6) (catch r 6)
-  (-> a 5) (|\\| a 4) (<- r 3) (= r 3) (|:=| a 3) (|,| a 2) (|;| a 2) ($$ r 2)
+  (-> a 5) (|\|| a 4) (<- r 3) (= r 3) (|:=| a 3) (|,| a 2) (|;| a 2) ($$ r 2)
   (|(| l 1) (|)| l 1) (|{| l 1) (|}| l 1) (|[| l 1) (|]| l 1))))
 (define-syntax uses (syntax-rules () ((_   m   ...) (begin (use m) ...))))
 (define-syntax defs (syntax-rules () ((_ (k v) ...) (begin (define k v) ...))))
@@ -15,65 +15,64 @@
 (uses util.match)
 (defs (True #t) (False #f) (|::| cons) (++ append) (== equal?) (^ expt) (% modulo) ($@ apply) (! not) (o compose) (<$> map))
 (macs (<- set!) (then and) (? and) (&& and) (|\|\|| or) (|;| begin))
-;(define-method object-apply (obj key) (ref obj key #f))
 (define-method object-apply (obj key) (guard (e (else #f)) (ref obj key)))
 (define-method (setter object-apply) (obj key val) (set! (ref obj key) val) obj)
 
-(define (=? x) (memq x '(= |:=|)))
-(define (np? x) (not (memq x '(|::| list))))
-(define (whre xs) (match xs
+(define (=p x) (memq x '(= |:=|)))
+(define (%np? x) (not (memq x '(|::| list))))
+(define (%where xs) (match xs
   (() ())
-  ((('= ('apply f ()) b) . xs) `((= ,f (-> '() ,b)) ,@(whre xs)))
-  ((((? =? o) ((? np? f) . a) b) . xs) (let
+  ((('= ('apply f ()) b) . xs) `((= ,f (-> '() ,b)) ,@(%where xs)))
+  ((((? =p o) ((? %np? f) . a) b) . xs) (let
     ((c `(-> ,(if (eq? o '=) a `(_ ,@a)) ,b))
-     (f? (pa$ eq? f))) (match (whre xs)
-    ((((? =?) (? f?) ('|\\| . ps)) . xs) `((,o ,f (|\\| ,c ,@ps)) ,@xs))
-    (                                xs  `((,o ,f (|\\| ,c     )) ,@xs)))))
-  ((x . xs) `(,x ,@(whre xs)))
+     (f? (pa$ eq? f))) (match (%where xs)
+    ((((? =p) (? f?) ('|\|| . ps)) . xs) `((,o ,f (|\|| ,c ,@ps)) ,@xs))
+    (                                xs  `((,o ,f (|\|| ,c     )) ,@xs)))))
+  ((x . xs) `(,x ,@(%where xs)))
   (xs xs)))
-(define (unsemc x) (match x (('|;| . x) x) (x `(,x))))
-(define (onearg? x) (or (not (pair? x)) (memq (car x) '(|::| list))))
-(define (listm x) (if (onearg? x) `(,x) x))
-(define (mkpat x) (match x
-  (('|::| x y) (cons (mkpat x) (mkpat y)))
-  (('list . xs) (map mkpat xs))
-  (('-> x y) `(,(listm (mkpat x)) ,y))
-  (('= x y) `(,(mkpat x) ,y))
-  (x (if (pair? x) (map mkpat x) x))))
-(define-macro (|\\| . x) `(match-lambda* ,@(mkpat x)))
+(define (%unsemc x) (match x (('|;| . x) x) (x `(,x))))
+(define (%onearg? x) (or (not (pair? x)) (memq (car x) '(|::| list))))
+(define (%listm x) (if (%onearg? x) `(,x) x))
+(define (%mkpat x) (match x
+  (('|::| x y) (cons (%mkpat x) (%mkpat y)))
+  (('list . xs) (map %mkpat xs))
+  (('-> x y) `(,(%listm (%mkpat x)) ,y))
+  (('= x y) `(,(%mkpat x) ,y))
+  (x (if (pair? x) (map %mkpat x) x))))
+(define-macro (|\|| . x) `(match-lambda* ,@(%mkpat x)))
 (define-macro (-> x y) (match x
   (''() `(lambda () ,y))
   (x `(|\\a| (-> ,x ,y)))))
 (define-macro (= x y) (match x
-  (((or 'list '|::|) . _) `(match-define ,(mkpat x) ,y))
+  (((or 'list '|::|) . _) `(match-define ,(%mkpat x) ,y))
   (_                      `(define ,x ,y))))
-(define-macro (|:=| . x) (match (mkpat x)
-  ((f (_ ((_ 'opt) o) . xs)) `(define-syntax ,f (syntax-rules ,(listm o) ,@xs)))
+(define-macro (|:=| . x) (match (%mkpat x)
+  ((f (_ ((_ 'opt) o) . xs)) `(define-syntax ,f (syntax-rules ,(%listm o) ,@xs)))
   ((f (_              . xs)) `(define-syntax ,f (syntax-rules  ()     ,@xs)))))
-(define-macro (where x y) `(match-letrec ,(mkpat (whre (unsemc y))) ,x))
-(define-macro (of x y) `((|\\| ,@(unsemc y)) ,x))
-(define (cnd x) (match x
+(define-macro (where x y) `(match-letrec ,(%mkpat (%where (%unsemc y))) ,x))
+(define-macro (of x y) `((|\|| ,@(%unsemc y)) ,x))
+(define (%cond x) (match x
   (((or 'then '?) x y) `(,x ,y))
   (               x    `(#t ,x))))
-(define-macro (else . xs) `(cond ,@(map cnd xs)))
-(define-macro (|:|  . xs) `(cond ,@(map cnd xs)))
-;(define-macro (call x) `(,x))
+(define-macro (else . xs) `(cond ,@(map %cond xs)))
+(define-macro (|:|  . xs) `(cond ,@(map %cond xs)))
 
-(define (<? x) (memq x '(|(| |{| |[|)))
-(define (>? x) (memq x '(|)| |}| |]|)))
-(define (op0 x) (and (op x) (not (or (<? x) (>? x)))))
-(define (pre s) (regexp-replace-all* s #/^((#!|--)[^\n]*)*\n+/ "0\n"))
-(define (len m l)
+(define (<p x) (memq x '(|(| |{| |[|)))
+(define (>p x) (memq x '(|)| |}| |]|)))
+(define (%op0 x) (and (%op x) (not (or (<p x) (>p x)))))
+(define (%pre s) (regexp-replace-all* s #/^((#!|--)[^\n]*)*\n+/ "0\n"))
+(define (%len m l)
   (match (#/\n+/ (m 2))
     (#f (+ (string-length (m)) l))
     (t     (string-length (t 'after)))))
 (define ($->e s) (rxmatch-case s
-  (#/([^$]*\$)\$(.*)/    (#f s   ss) `(,s ,@($->e ss)))
-  (#/([^$]*)\$(\w+|{.+?})(.*)/ (#f s x ss) `(,s ,(p&s x) ,@($->e ss)))
+  (#/(^[^$]*\$)\$(.*)/    (#f s   ss) `(,s ,@($->e ss)))
+  (#/(^[^$]*)\$([%&]?)(\w+|{.+?})(.*)/ (#f s m x ss) `(,s (enc ,m (x->string ,(parse x))) ,@($->e ss)))
   (else `(,s))))
-(define (rd s) (rxmatch-case s
+(define (%rd s) (rxmatch-case s
   (#/^<html/ () `(print header ,@($->e s)))
-  (#/^'(.*)'$/ (#f x) (if (#/\$/ x) `(~ ,@($->e x)) x))
+  (#/^'(.*)'$/ (#f x) (if (#/\$/ x) `(& ,@($->e x)) x))
+  (#/^"/ () (let1 x (read-from-string s) (if (#/\$/ x) `(& ,@($->e x)) x)))
   (#/^`(.*)`$/ (#f x) (read-from-string x))
   (#/^[a-z]/ () (string->symbol (regexp-replace-all* s
     #/P$/ "?" #/Q$/ "!" #/S$/ "*" "2" "->"
@@ -81,66 +80,66 @@
     #/^to-/ "x->")))
   (#/^[\"#\w]/ () (read-from-string s))
   (else (string->symbol s))))
-(define (scan n s)
+(define (%scan n s)
             ;(regexp             |#exp|html        |str1 |string         |symbl|num          |var|paren     |op
   (match (#/^(#\/(?:\\.|[^\/])*\/|#\S+|<html.*html>|'.*?'|"(?:\\.|[^"])*"|`.*?`|\d+(?:\.\d+)?|\w+|[()\[\]{}]|[^\w\s()\[\]{}#`"']+)(?:\s*-- [^\n]*)*(\s*)/ s)
     (#f ())
-    (m (let* ((l (len m n)) (x (rd (m 1))) (xs (scan l (m 'after)))) (cond 
+    (m (let* ((l (%len m n)) (x (%rd (m 1))) (xs (%scan l (m 'after)))) (cond 
       ((#/^(let|do|where|of|pp)$/ (m 1)) `(,x ("{}" ,l) ,@xs))
       ((#/ *\n/ (m 2))                `(,x ("<>" ,l) ,@xs))
       (else                           `(,x           ,@xs)))))))
-(define L (match-lambda*
-  ((ts) (L `(|(| ,@ts) '(0)))
+(define %L (match-lambda*
+  ((ts) (%L `(|(| ,@ts) '(0)))
   (((("<>" 0)) (0)) `(|)|))
-  (((("{}" n) '|(| . ts) mss) `(|(| ,@(L ts mss)))
-  (((("{}" n)      . ts) mss) `(|(| ,@(L ts `(,n ,@mss))))
+  (((("{}" n) '|(| . ts) mss) `(|(| ,@(%L ts mss)))
+  (((("{}" n)      . ts) mss) `(|(| ,@(%L ts `(,n ,@mss))))
   (((and (("<>" n) . ts) tss) (and (m . ms) mss)) (cond
-    ((> n m)              (L ts mss))
-    ((< n m)      `(|)| ,@(L tss ms)))
-    (else         `(|;| ,@(L ts mss)))))
-  (((t . ts) mss) `(,t  ,@(L ts mss)))
-  ((() mss) (L '(("<>" 0)) mss))
-  (x (error "L" x))))
-(define (ap . xs) (match xs
-  ((f x (g . y)) (if (and (eq? f g) (eq? (car (op f)) 'a)) `(,f ,x ,@y) xs))
+    ((> n m)              (%L ts mss))
+    ((< n m)      `(|)| ,@(%L tss ms)))
+    (else         `(|;| ,@(%L ts mss)))))
+  (((t . ts) mss) `(,t  ,@(%L ts mss)))
+  ((() mss) (%L '(("<>" 0)) mss))
+  (x (error "%L" x))))
+(define (%ap . xs) (match xs
+  ((f x (g . y)) (if (and (eq? f g) (eq? (car (%op f)) 'a)) `(,f ,x ,@y) xs))
   (xs xs)))
-(define (reduce? . os) (match (map op os)
+(define (%reduce? . os) (match (map %op os)
   (((d1 n1) (d2 n2)) (if (eq? n1 n2) (eq? d1 'l) (> n1 n2)))
-  (_ (error "reduce?" os))))
-(define (sect f) (let1 g (gensym)
+  (_ (error "%reduce?" os))))
+(define (%sect f) (let1 g (gensym)
   (match-let1 (z . zs) (f g) `((lambda (,g) ,z) ,@zs))))
-(define (paren p x) (match `(,p ,x)
+(define (%paren p x) (match `(,p ,x)
   (('|(| x) x)
   (('|[| ('|,| . xs)) `(list ,@xs))
   (('|{| ('|,| . xs)) `(dict ,@xs))
   (('|{| (and ((not '|:|) . _) x)) x)
-  ((p x) (paren p `(|,| ,x)))))
+  ((p x) (%paren p `(|,| ,x)))))
 (define (%nil p) (match p ('|(| ''()) ('|[| ()) ('|{| '(hash-table 'equal?))))
-(define (parse x) (match x
-  (((? <? p) (? >?) . xs) `(,(%nil p) ,@xs)) ;[]
-  (((? <?  ) (? op0 o) (? >?) . xs) `((id ,o) ,@xs))      ;(+)
-  (((? <? p) (? op0 o) . xs) (sect (lambda (g) (parse `(,p ,g ,o ,@xs))))) ;(+x)
-  (((? <? p) . xs) (pars `(,p -) (pss xs)))
+(define (%parse x) (match x
+  (((? <p p) (? >p) . xs) `(,(%nil p) ,@xs)) ;[]
+  (((? <p  ) (? %op0 o) (? >p) . xs) `((id ,o) ,@xs))      ;(+)
+  (((? <p p) (? %op0 o) . xs) (%sect (lambda (g) (%parse `(,p ,g ,o ,@xs))))) ;(+x)
+  (((? <p p) . xs) (%pars `(,p -) (%pss xs)))
   (x x)))
-(define (pars x i) (match `(,x ,i)
-  ((xs ((y) . is)) (pars xs `(,y ,@is))) ;one arg
-  ((xs (('infix lr n o) '|;| . is)) (set! (op o) `(,lr ,n)) (pars xs is))
-  ((((? <? p) . _) (y (? >?) . is)) `(,(paren p y) ,@is)) ;end
-  ((xs (y (? op0 o) (? >? p) . is)) (sect (lambda (g) (pars xs `(,y ,o ,g ,p ,@is)))));(x+)
-  (((and (o1 x . xs) xss) (y (? op o2) . is)) (cond
-    ((reduce? o1 o2) (pars xs `(,(ap o1 x y) ,o2 ,@is))) ;reduce
-    (else            (pars `(,o2 ,y ,@xss) (pss is))))) ;shift
-  (x (error "pars" x))))
-(define (pss x) (match (parse x)
-  (((? op o) . xs) `(() ,o ,@xs))
-  (((or 'if 'do 'case) . xs) (pss xs))
-  ;(((or ('id x) x) . xs) (match-let1 (y . ys) (pss xs) `((,x ,@y) ,@ys)))
-  (((or ('id x) x) . xs) (match (pss xs)
+(define (%pars x i) (match `(,x ,i)
+  ((xs ((y) . is)) (%pars xs `(,y ,@is))) ;one arg
+  ((xs (('infix lr n o) '|;| . is)) (set! (%op o) `(,lr ,n)) (%pars xs is))
+  ((((? <p p) . _) (y (? >p) . is)) `(,(%paren p y) ,@is)) ;end
+  ((xs (y (? %op0 o) (? >p p) . is)) (%sect (lambda (g) (%pars xs `(,y ,o ,g ,p ,@is)))));(x+)
+  (((and (o1 x . xs) xss) (y (? %op o2) . is)) (cond
+    ((%reduce? o1 o2) (%pars xs `(,(%ap o1 x y) ,o2 ,@is))) ;reduce
+    (else            (%pars `(,o2 ,y ,@xss) (%pss is))))) ;shift
+  (x (error "%pars" x))))
+(define (%pss x) (match (%parse x)
+  (((? %op o) . xs) `(() ,o ,@xs))
+  (((or 'if 'do 'case) . xs) (%pss xs))
+  ;(((or ('id x) x) . xs) (match-let1 (y . ys) (%pss xs) `((,x ,@y) ,@ys)))
+  (((or ('id x) x) . xs) (match (%pss xs)
     (((''()) . ys) `((apply ,x ()) ,@ys))
     ((y      . ys) `((,x ,@y)      ,@ys))))
-  (x (error "pss" x))))
-(define (p&s src) (whre (car (parse (L (scan 0 (pre src)))))))
-(define (evl src) (eval (p&s src) (interaction-environment)))
+  (x (error "%pss" x))))
+(define (parse src) (%where (car (%parse (%L (%scan 0 (%pre src)))))))
+(define (evl src) (eval (parse src) (interaction-environment)))
 
 (define (hosh src) (let1 thunk (lambda () (evl
     (if (pair? *argv*) (call-with-input-file (car *argv*) port->string) src)))
@@ -152,14 +151,14 @@ f ... $ x := f ... x
 f     $ x := f x
 (f $$ x) := f $ x
 x . f := f $ x
-x -> y := (\\) (x -> y)
+x -> y := (|) (x -> y)
 let_ x in y := y where x
-x ~ ... = stringAppend $@ toString <$> x
+x & ... = stringAppend $@ toString <$> x
 x + ... = withModule gauche (+) $@ x2number <$> x
 header = \"Content-Type: text/html; charset=UTF-8\\n\\n<!DOCTYPE html>\\n\"
-open s \"w\" f = callWithOutputFile s f
-open s \"a\" f = callWithOutputFile s f `:if-exists` `:append`
-open s _     f = callWithInputFile  s f
+open s 'w' f = callWithOutputFile s f
+open s 'a' f = callWithOutputFile s f `:if-exists` `:append`
+open s  _  f = callWithInputFile  s f
 readFile   f   = open f 'r' port2string
 writeFile  f s = open f 'w' (display s $)
 appendFile f s = open f 'a' (display s $)
@@ -186,8 +185,8 @@ cgidic = hash (qs =~ #/=/ ? kv <$> split #/&/ qs : [])
 cgi x := cgidic (quote x) || ''
 argf [] f = portForEach f readLine
 argf xs f = forEach (x -> withInputFromFile x (()->portForEach f readLine)) xs
-pf s (x::xs) = s ~ '(' ~ x ~ (apply (~) $ map (pf (s ~ '  ') $) xs) ~ ')'
-pf s  x      =     ' ' ~ x
+pf s (x::xs) = s & '(' & x & (apply (&) $ map (pf (s & '  ') $) xs) & ')'
+pf s  x      =     ' ' & x
 (pp x) := print $ pf '\n' $ unwrapSyntax $ macroexpand $ quote x
 show #t = 'True'
 show #f = 'False'
@@ -199,14 +198,17 @@ shows (x::xs) = ', ${show x}${shows xs}'
 shows x = ' | ${show x}'
 p x = print $ show x
 dict (x:y) ... := hashTable (quote equalP) (toString (quote x) :: y) ...
-enc '&' s = s.replace #/</ '&lt;'
+enc '&' s = s.replace '<' '&lt;'.replace '&' '&amp;'.replace '>' '&gt;'
 enc '%' s = withStringIo s (()-> portForEach wf readByte)
   where wf b = charSetContainsP #[\\w] (integer2char b) ? writeByte b
              : format #t \"%~2,'0x\" b
-hread() = `p&s` $ readLine()
+enc _ s = s
+hread() = parse $ readLine()
 hprompt() = (display 'hosh> '; flush())
-size x = stringP x ? stringLength x
-       : length x
 ")
 ;(hosh "readEvalPrintLoop hread #f p hprompt")
-(hosh "main arg = print arg")
+(hosh "
+<html>
+${1+1}
+</html>
+")
