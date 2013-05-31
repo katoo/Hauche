@@ -61,14 +61,14 @@
 (define (>p x) (memq x '(|)| |}| |]|)))
 (define (%op0 x) (and (%op x) (not (or (<p x) (>p x)))))
 (define (%pre s) (regexp-replace-all* s #/^((#!|--)[^\n]*)*\n+/ "0\n"))
-(define (%len m l)
-  (match (#/\n+/ (m 2))
-    (#f (+ (string-length (m)) l))
-    (t     (string-length (t 'after)))))
+(define (%len m l) (match (#/\n+/ (m 2))
+  (#f (+ (string-length (m)) l))
+  (t     (string-length (t 'after)))))
 (define ($->e s) (rxmatch-case s
-  (#/(^[^$]*\$)\$(.*)/    (#f s   ss) `(,s ,@($->e ss)))
-  (#/(^[^$]*)\$([%&]?)(\w+|{.+?})(.*)/ (#f s m x ss) `(,s (enc ,m (x->string ,(parse x))) ,@($->e ss)))
-  (else `(,s))))
+  (#/(^[^$]*\$)\$(.*)/                 (#f s     ss) `(,s ,@($->e ss)))
+  (#/(^[^$]*)\$([%&]?)(\w+|{.+?})(.*)/ (#f s m x ss)
+                     `(,s (enc ,m (x->string ,(parse x))) ,@($->e ss)))
+  (else              `(,s))))
 (define (%rd s) (rxmatch-case s
   (#/^<html/ () `(print header ,@($->e s)))
   (#/^'(.*)'$/ (#f x) (if (#/\$/ x) `(& ,@($->e x)) x))
@@ -82,17 +82,22 @@
   (else (string->symbol s))))
 (define (%scan n s)
             ;(regexp             |#exp|html        |str1 |string         |symbl|num          |var|paren     |op
-  (match (#/^(#\/(?:\\.|[^\/])*\/|#\S+|<html.*html>|'.*?'|"(?:\\.|[^"])*"|`.*?`|\d+(?:\.\d+)?|\w+|[()\[\]{}]|[^\w\s()\[\]{}#`"']+)(?:\s*-- [^\n]*)*(\s*)/ s)
+  (match (#/^(#\/(?:\\.|[^\/])*\/|#\S+|<html.*html>|'(?:\${.*?}|.)*?'|"(?:\\.|[^"])*"|`.*?`|\d+(?:\.\d+)?|\w+|[()\[\]{}]|[^\w\s()\[\]{}#`"']+)(?:\s*-- [^\n]*)*(\s*)/ s)
     (#f ())
     (m (let* ((l (%len m n)) (x (%rd (m 1))) (xs (%scan l (m 'after)))) (cond 
-      ((#/^(let|do|where|of|pp)$/ (m 1)) `(,x ("{}" ,l) ,@xs))
-      ((#/ *\n/ (m 2))                `(,x ("<>" ,l) ,@xs))
-      (else                           `(,x           ,@xs)))))))
-(define %L (match-lambda*
-  ((ts) (%L `(|(| ,@ts) '(0)))
+      ((#/^(let|do|where|of|pp)$/ (m 1)) (match xs
+        (('|{| . _)    `(,x ,@xs))
+        (_             `(,x ("{}" ,l) ,@xs))))
+      ((#/ *\n/ (m 2)) `(,x ("<>" ,l) ,@xs))
+      (else            `(,x           ,@xs)))))))
+(define (%L tss mss) (match `(,tss ,mss)
+  ((ts ()) `(|(| ,@(%L ts '(0))))
   (((("<>" 0)) (0)) `(|)|))
-  (((("{}" n) '|(| . ts) mss) `(|(| ,@(%L ts mss)))
-  (((("{}" n)      . ts) mss) `(|(| ,@(%L ts `(,n ,@mss))))
+  ;(((("{}" n) '|(| . ts) mss) `(|(| ,@(%L ts mss)))
+  (((("{}" n)      . ts) mss) `(|(| ,@(%L ts `(,n ,@mss)))) ;note1
+  ((((? >p p) . ts) (0 . ms)) `(,p  ,@(%L ts ms)))          ;note3
+  ((((? >p p) . ts) (m . ms)) `(|)| ,@(%L tss ms)))         ;note3*
+  ((((? <p p) . ts)      ms ) `(,p  ,@(%L ts `(0 ,@ms))))   ;note4
   (((and (("<>" n) . ts) tss) (and (m . ms) mss)) (cond
     ((> n m)              (%L ts mss))
     ((< n m)      `(|)| ,@(%L tss ms)))
@@ -129,7 +134,7 @@
   (((and (o1 x . xs) xss) (y (? %op o2) . is)) (cond
     ((%reduce? o1 o2) (%pars xs `(,(%ap o1 x y) ,o2 ,@is))) ;reduce
     (else            (%pars `(,o2 ,y ,@xss) (%pss is))))) ;shift
-  (x (error "%pars" x))))
+  (x (error "%pars" `(,x ,i)))))
 (define (%pss x) (match (%parse x)
   (((? %op o) . xs) `(() ,o ,@xs))
   (((or 'if 'do 'case) . xs) (%pss xs))
@@ -138,7 +143,7 @@
     (((''()) . ys) `((apply ,x ()) ,@ys))
     ((y      . ys) `((,x ,@y)      ,@ys))))
   (x (error "%pss" x))))
-(define (parse src) (%where (car (%parse (%L (%scan 0 (%pre src)))))))
+(define (parse src) (%where (car (%parse (%L (%scan 0 (%pre src)) ())))))
 (define (evl src) (eval (parse src) (interaction-environment)))
 
 (define (hosh src) (let1 thunk (lambda () (evl
@@ -147,6 +152,7 @@
     (with-error-handler (lambda (e) (print header (ref e 'message))) thunk)
     (thunk))))
 (evl "#!init
+id x = x
 f ... $ x := f ... x
 f     $ x := f x
 (f $$ x) := f $ x
@@ -159,7 +165,9 @@ header = \"Content-Type: text/html; charset=UTF-8\\n\\n<!DOCTYPE html>\\n\"
 open s 'w' f = callWithOutputFile s f
 open s 'a' f = callWithOutputFile s f `:if-exists` `:append`
 open s  _  f = callWithInputFile  s f
-readFile   f   = open f 'r' port2string
+readFile f = case f =~ #/^http:..(.*?)(\\/.*)/ of
+  #f -> callWithInputFile f port2string
+  m  -> do use `rfc.http`;receive (a b c) (httpGet (m 0) (m 1)) c
 writeFile  f s = open f 'w' (display s $)
 appendFile f s = open f 'a' (display s $)
 split x y = stringSplit y x
@@ -187,7 +195,7 @@ argf [] f = portForEach f readLine
 argf xs f = forEach (x -> withInputFromFile x (()->portForEach f readLine)) xs
 pf s (x::xs) = s & '(' & x & (apply (&) $ map (pf (s & '  ') $) xs) & ')'
 pf s  x      =     ' ' & x
-(pp x) := print $ pf '\n' $ unwrapSyntax $ macroexpand $ quote x
+(pp x) := print $ pf '\n' $ quote x -- unwrapSyntax $ macroexpand $ quote x
 show #t = 'True'
 show #f = 'False'
 show [] = '[]'
@@ -198,17 +206,23 @@ shows (x::xs) = ', ${show x}${shows xs}'
 shows x = ' | ${show x}'
 p x = print $ show x
 dict (x:y) ... := hashTable (quote equalP) (toString (quote x) :: y) ...
-enc '&' s = s.replace '<' '&lt;'.replace '&' '&amp;'.replace '>' '&gt;'
+enc '&' s = s.replace '&' '&amp;'.replace '<' '&lt;'.replace '>' '&gt;'
 enc '%' s = withStringIo s (()-> portForEach wf readByte)
   where wf b = charSetContainsP #[\\w] (integer2char b) ? writeByte b
              : format #t \"%~2,'0x\" b
 enc _ s = s
 hread() = parse $ readLine()
 hprompt() = (display 'hosh> '; flush())
+infix a 20 ~
+x ~ ... = apply (&) x
 ")
 ;(hosh "readEvalPrintLoop hread #f p hprompt")
-(hosh "
-<html>
-${1+1}
-</html>
-")
+(print (%L (%scan 0 "()
+a {do b
+      c} d
+let {x=1} in x+1
+map {x->do
+      aa
+      bb} lis
+{pp x} = x
+") ()))
