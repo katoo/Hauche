@@ -67,14 +67,14 @@
   (#f (+ (string-length (m)) l))
   (t     (string-length (t 'after)))))
 (define ($->e s) (rxmatch-case s
-  (#/(^[^$]*\$)\$(.*)/                 (#f s     ss) `(,s ,@($->e ss)))
+  (#/(^[^$]*\$)\$(.*)/                  (#f s     ss) `(,s ,@($->e ss)))
   (#/(^[^$]*)\$([%&?]?)(\w+|{.+?})(.*)/ (#f s m x ss)
-                     `(,s (enc ,m (x->string ,(parse x))) ,@($->e ss)))
-  (else              `(,s))))
+                      `(,s (enc ,m (x->string ,(parse x))) ,@($->e ss)))
+  (else               `(,s))))
 (define (%rd s) (rxmatch-case s
   (#/^<html/ () `(print header ,@($->e s)))
   (#/^'(.*)'$/ (#f x) (if (#/\$/ x) `(& ,@($->e x)) x))
-  (#/^"/ () (let1 x (read-from-string s) (if (#/\$/ x) `(& ,@($->e x)) x)))
+  (#/^"/ () (let1 x (read-from-string (regexp-replace-all* s #/([^\\])"(.)/ "\\1\\")) (if (#/\$/ x) `(& ,@($->e x)) x)))
   (#/^`(.*)`$/ (#f x) (read-from-string x))
   (#/^[a-z]/ () (string->symbol (regexp-replace-all* s
     #/P$/ "?" #/Q$/ "!" #/S$/ "*" "2" "->"
@@ -83,7 +83,7 @@
   (#/^[\"#\w]/ () (read-from-string s))
   (else (string->symbol s))))
 (define (%scan n s)
-            ;(regexp             |#exp|html        |str1 |string         |symbl|num          |var|paren     |op
+            ;(regexp             |#exp|html        |str1               |string         |symbl|num          |var|paren     |op
   (match (#/^(#\/(?:\\.|[^\/])*\/|#\S+|<html.*html>|'(?:\$.?{.*?}|.)*?'|"(?:\\.|[^"])*"|`.*?`|\d+(?:\.\d+)?|\w+|[()\[\]{}]|[^\w\s()\[\]{}#`"']+)(?:\s*-- [^\n]*)*(\s*)/ s)
     (#f ())
     (m (let* ((l (%len m n)) (x (%rd (m 1))) (xs (%scan l (m 'after)))) (cond 
@@ -228,7 +228,8 @@ enc '%' s = withStringIo s (()-> portForEach wf readByte)
   where wf b = charSetContainsP #[\\w] (integer2char b) ? writeByte b
              : format #t \"%~2,'0x\" b
 enc _ s = s
-hread() = parse $ readLine()
+hread() = eofObjectP s ? s : parse s
+  where s = readLine()
 hprompt() = (display 'hosh> '; flush())
 infix a 20 ~
 x ~ ... = apply (&) x
@@ -250,17 +251,6 @@ sh cmd dat = callWithProcessIo    cmd f
   where f ip op = do display dat op
                      closeOutputPort op
                      port2string ip
+main arg = readEvalPrintLoop hread #f p hprompt
 ")
-;(hosh "readEvalPrintLoop hread #f p hprompt")
-'(print (%L (%scan 0 "()
-a {do b
-      c} d
-let {x=1} in x+1
-map {x->do
-      aa
-      bb} lis
-{pp x} = x
-") ()))
-(hosh "print $ sh 'sort' '1\n3\n2'
-print $ sh 'ls'")
-
+(hosh "")
